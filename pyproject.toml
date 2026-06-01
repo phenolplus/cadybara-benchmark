@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cadybara-benchmark"
+version = "0.1.0"
+description = "Local benchmark CLI for Cadybara Agent API experiments"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12",
+  "python-dotenv>=1.0",
+  "requests>=2.32",
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+cadybara-benchmark = "cadybara_benchmark.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["cadybara_benchmark*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

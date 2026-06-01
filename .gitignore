@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Local API reference
+agent-api.md
+
+# Local benchmark workspace
+workspace/research.db
+workspace/*.db
+workspace/responses/
+workspace/generated/
+workspace/reports/
+workspace/artifacts/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

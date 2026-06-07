@@ -59,6 +59,10 @@ When generating or modifying code, the agent MUST:
 
 Whenever you produce code that **affects or changes user-facing components** (for example marketing pages, app shell UI, shared styles, copy, or assets users see), you **must** read **`STYLES.md`** at the repository root and apply layout, typography, colors, and vocabulary **consistent with that document**, unless the user **explicitly overrides** those choices in their request.
 
+### Cadybara API
+
+When making code changes relating to the Cadybara API, consult **`agent-api.md`** for instructions.
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill

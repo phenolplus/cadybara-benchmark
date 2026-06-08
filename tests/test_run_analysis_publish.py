@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from cadybara_benchmark.api_client import GenerateResult
 from cadybara_benchmark.publishing import publish_experiment
 from cadybara_benchmark.run_files import get_run, list_runs, next_run_id, summary_path
@@ -126,6 +128,9 @@ def test_run_analyze_and_publish(settings):
     assert (settings.published_dir / "runs" / "RUN001.json").exists()
     assert (settings.published_dir / "runs" / "RUN001" / "Q001" / "model.stl").exists()
     assert (settings.published_dir / "runs" / "RUN001" / "Q002" / "model.stl").exists()
+
+    published_payload = json.loads((settings.published_dir / "runs" / "RUN001.json").read_text())
+    assert all(query["client_latency_ms"] == 100 for query in published_payload["queries"])
 
 
 def test_run_uses_query_model_over_experiment_default(settings):

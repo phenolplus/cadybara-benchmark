@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from cadybara_benchmark.config import REPO_ROOT, get_settings
+from cadybara_benchmark.metrics import average_client_latency_ms, client_latency_ms
 from cadybara_benchmark.publishing import publish_experiment
 from cadybara_benchmark.services.experiments import (
     create_experiment,
@@ -199,7 +200,7 @@ def _experiment_summary(experiment: dict[str, Any]) -> dict[str, Any]:
 
 
 def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
-    queries = [_with_query_artifact_data(query) for query in run.get("queries", [])]
+    queries = [_with_query_api_fields(query) for query in run.get("queries", [])]
     completed = len([query for query in queries if query.get("status") == "completed"])
     failed = len([query for query in queries if query.get("status") == "failed"])
     scores = [query["score"] for query in queries if query.get("score") is not None]
@@ -211,6 +212,7 @@ def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
         "completed_count": completed,
         "failed_count": failed,
         "average_score": average_score,
+        "average_client_latency_ms": average_client_latency_ms(queries),
     }
 
 
@@ -231,7 +233,7 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
     run = get_run(experiment_id, run_id)
     queries = []
     for query in run.get("queries", []):
-        query = _with_query_artifact_data(query)
+        query = _with_query_api_fields(query)
         stl_path = _resolve_query_stl_path(query)
         queries.append(
             {
@@ -243,12 +245,13 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
         **run,
         "experiment_id": experiment_id,
         "queries": queries,
+        "average_client_latency_ms": average_client_latency_ms(queries),
     }
 
 
 def _run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:
     run = get_run(experiment_id, run_id)
-    query = _with_query_artifact_data(_find_run_query(run, query_id))
+    query = _with_query_api_fields(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     return {
         **query,
@@ -267,11 +270,19 @@ def _find_run_query(run: dict[str, Any], query_id: str) -> dict[str, Any]:
 
 def _query_stl_path(experiment_id: str, run_id: str, query_id: str) -> Path:
     run = get_run(experiment_id, run_id)
-    query = _with_query_artifact_data(_find_run_query(run, query_id))
+    query = _with_query_api_fields(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     if stl_path is None:
         raise ValueError(f"Query {query_id} has no STL artifact.")
     return stl_path
+
+
+def _with_query_api_fields(query: dict[str, Any]) -> dict[str, Any]:
+    hydrated = _with_query_artifact_data(query)
+    latency = client_latency_ms(hydrated)
+    if latency is not None:
+        hydrated["client_latency_ms"] = latency
+    return hydrated
 
 
 def _with_query_artifact_data(query: dict[str, Any]) -> dict[str, Any]:

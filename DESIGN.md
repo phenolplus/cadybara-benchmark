@@ -508,6 +508,8 @@ score
 metrics
 ```
 
+`response_metadata.latency_ms` records benchmark-client HTTP round-trip time in milliseconds: from when the request is sent to the Cadybara API until the full HTTP response body is received. This is distinct from API-reported `metrics.latency` (agent latency in seconds from the Cadybara server).
+
 ---
 
 ## Result

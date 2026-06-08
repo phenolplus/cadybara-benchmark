@@ -29,7 +29,14 @@ async function initViewer() {
     );
     meta.textContent = `${experimentId} · ${runId} · ${query.query_id || queryId}`;
     title.textContent = query.sublabel || query.query_id || queryId;
+    const latencyMs = getClientLatencyMs(query);
     text.textContent = query.text || "";
+    if (latencyMs !== null) {
+      const latencyLine = document.createElement("div");
+      latencyLine.className = "text-body-secondary small mt-1";
+      latencyLine.textContent = `Client latency: ${latencyMs} ms`;
+      text.after(latencyLine);
+    }
     if (!query.has_stl) {
       showError("This query has no STL artifact to display.");
       return;
@@ -140,4 +147,13 @@ async function fetchJson(url) {
 function showError(message) {
   status.textContent = message;
   status.classList.add("text-danger");
+}
+
+function getClientLatencyMs(query) {
+  if (typeof query.client_latency_ms === "number") return query.client_latency_ms;
+  const meta = query.response_metadata;
+  if (meta && typeof meta.latency_ms === "number") return meta.latency_ms;
+  const error = query.error;
+  if (error && typeof error.latency_ms === "number") return error.latency_ms;
+  return null;
 }

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
+from cadybara_benchmark.metrics import client_latency_ms
 from cadybara_benchmark.json_utils import dumps_json
 from cadybara_benchmark.services.experiments import get_experiment
 from cadybara_benchmark.services.runs import list_runs
@@ -43,18 +44,20 @@ def publish_experiment(
             query_publish_dir.mkdir(parents=True, exist_ok=True)
             destination = query_publish_dir / stl_path.name
             shutil.copy2(stl_path, destination)
-            published_queries.append(
-                {
-                    "query_id": query["query_id"],
-                    "sublabel": query.get("sublabel", ""),
-                    "text": query.get("text", ""),
-                    "model": query.get("model", ""),
-                    "stl_paths": [_stored_path(destination)],
-                    "score": query.get("score"),
-                    "metrics": query.get("metrics", {}),
-                    "source_artifact_paths": [_stored_path(stl_path)],
-                }
-            )
+            published_entry: dict[str, Any] = {
+                "query_id": query["query_id"],
+                "sublabel": query.get("sublabel", ""),
+                "text": query.get("text", ""),
+                "model": query.get("model", ""),
+                "stl_paths": [_stored_path(destination)],
+                "score": query.get("score"),
+                "metrics": query.get("metrics", {}),
+                "source_artifact_paths": [_stored_path(stl_path)],
+            }
+            latency = client_latency_ms(query)
+            if latency is not None:
+                published_entry["client_latency_ms"] = latency
+            published_queries.append(published_entry)
 
         if not published_queries:
             continue

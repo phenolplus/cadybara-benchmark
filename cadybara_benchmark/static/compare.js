@@ -117,6 +117,7 @@ function createBlockShell(item) {
         <div class="label">Prompt</div>
         <div class="value">${escapeHtml(query.text || "")}</div>
       </div>
+      ${formatClientLatencyBlock(query)}
       ${formatMetricsBlock(query.metrics)}
       ${query.status === "failed" ? `<div class="error">${escapeHtml(formatError(query.error))}</div>` : ""}
     </div>
@@ -277,6 +278,30 @@ function formatError(error) {
   if (typeof error === "string") return error;
   if (error && typeof error.message === "string") return error.message;
   return JSON.stringify(error);
+}
+
+function formatClientLatencyBlock(query) {
+  const latencyMs = getClientLatencyMs(query);
+  if (latencyMs === null) return "";
+  return `
+    <div>
+      <div class="label">Client latency</div>
+      <div class="value">${escapeHtml(formatClientLatency(latencyMs))}</div>
+    </div>
+  `;
+}
+
+function getClientLatencyMs(query) {
+  if (typeof query.client_latency_ms === "number") return query.client_latency_ms;
+  const meta = query.response_metadata;
+  if (meta && typeof meta.latency_ms === "number") return meta.latency_ms;
+  const error = query.error;
+  if (error && typeof error.latency_ms === "number") return error.latency_ms;
+  return null;
+}
+
+function formatClientLatency(latencyMs) {
+  return `${latencyMs} ms`;
 }
 
 function formatMetricsBlock(metrics) {

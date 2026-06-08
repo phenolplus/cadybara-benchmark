@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from cadybara_benchmark.api_client import GenerateResult
+from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.experiments import create_experiment
 from cadybara_benchmark.services.queries import add_query
 from cadybara_benchmark.services.runs import run_experiment
@@ -11,6 +12,7 @@ from cadybara_benchmark.web import (
     _query_stl_path,
     _run_payload,
     _run_query,
+    _with_run_stats,
     compare_viewer,
     stl_viewer,
 )
@@ -61,6 +63,7 @@ def test_stl_viewer_page_and_artifact_resolution(settings, monkeypatch):
     assert metadata["query_id"] == "Q001"
     assert metadata["has_stl"] is True
     assert metadata["text"] == "Create a cube."
+    assert metadata["client_latency_ms"] == 100
 
     stl_path = _query_stl_path("EXP001", "RUN001", "Q001")
     assert stl_path == Path(settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001" / "model.stl")
@@ -103,6 +106,35 @@ def test_compare_page_and_run_payload(settings, monkeypatch):
         "steps": 4,
         "tool_calls": 9,
     }
+    assert payload["queries"][0]["client_latency_ms"] == 100
+    assert payload["average_client_latency_ms"] == 100
+
+
+def test_with_run_stats_includes_client_latency(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Latency Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    run = _with_run_stats(get_run("EXP001", "RUN001", settings))
+    assert run["average_client_latency_ms"] == 100
+    assert run["queries"][0]["client_latency_ms"] == 100
+
+
+def test_compare_renders_client_latency():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert "${formatClientLatencyBlock(query)}" in script
+    assert '<div class="label">Client latency</div>' in script
+
+
+def test_app_renders_client_latency():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert "Avg client latency" in script
+    assert "Client latency" in script
+    assert "getClientLatencyMs" in script
 
 
 def test_compare_renders_metrics_list():

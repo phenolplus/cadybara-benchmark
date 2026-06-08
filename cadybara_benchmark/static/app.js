@@ -122,7 +122,7 @@ async function renderExperiment(id) {
       <div class="col-12">
         <section class="panel overflow-hidden">
           <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
-          ${experiment.runs.length ? runsTable(experiment.runs) : `<div class="empty-state m-3">No runs recorded.</div>`}
+          ${experiment.runs.length ? runsTable(experiment.runs, experiment.id) : `<div class="empty-state m-3">No runs recorded.</div>`}
         </section>
       </div>
     </div>
@@ -191,20 +191,20 @@ function queriesTable(queries) {
   `;
 }
 
-function runsTable(runs) {
+function runsTable(runs, experimentId) {
   return `
     <div class="table-responsive">
       <table class="table runs-table">
         <thead><tr><th></th><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
         <tbody>
-          ${runs.map((run) => runRows(run)).join("")}
+          ${runs.map((run) => runRows(run, experimentId)).join("")}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function runRows(run) {
+function runRows(run, experimentId) {
   const queries = run.queries || [];
   const runId = run.id;
   return `
@@ -219,20 +219,23 @@ function runRows(run) {
     </tr>
     <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
       <td colspan="7">
-        ${queries.length ? runQueriesTable(queries) : `<div class="text-body-secondary small py-2">No query results.</div>`}
+        ${queries.length ? runQueriesTable(queries, experimentId, runId) : `<div class="text-body-secondary small py-2">No query results.</div>`}
       </td>
     </tr>
   `;
 }
 
-function runQueriesTable(queries) {
+function runQueriesTable(queries, experimentId, runId) {
   return `
     <table class="table table-sm mb-0 run-queries-table">
-      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Text</th></tr></thead>
+      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Text</th><th></th></tr></thead>
       <tbody>
-        ${queries.map((query) => `
+        ${queries.map((query) => {
+          const queryId = query.query_id || query.id || "";
+          const viewUrl = `/view/${encodeURIComponent(experimentId)}/${encodeURIComponent(runId)}/${encodeURIComponent(queryId)}`;
+          return `
           <tr>
-            <td class="fw-semibold">${escapeHtml(query.query_id || query.id || "")}</td>
+            <td class="fw-semibold">${escapeHtml(queryId)}</td>
             <td>${escapeHtml(query.sublabel || "")}</td>
             <td class="small">${escapeHtml(query.model || "")}</td>
             <td>${statusBadge(query.status)}</td>
@@ -241,8 +244,12 @@ function runQueriesTable(queries) {
               ${escapeHtml(query.text || "")}
               ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
             </td>
+            <td class="text-nowrap">
+              ${query.status === "completed" ? `<a class="btn btn-sm btn-outline-secondary" href="${escapeAttr(viewUrl)}">View</a>` : ""}
+            </td>
           </tr>
-        `).join("")}
+        `;
+        }).join("")}
       </tbody>
     </table>
   `;
@@ -253,7 +260,7 @@ function bindRunsTable() {
   if (!table) return;
 
   table.addEventListener("click", (event) => {
-    if (event.target.closest("button")) return;
+    if (event.target.closest("button, a")) return;
     const row = event.target.closest(".run-row");
     if (!row) return;
     toggleRunRow(row.dataset.runId);

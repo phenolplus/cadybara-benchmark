@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ from cadybara_benchmark.services.experiments import (
     list_experiments,
 )
 from cadybara_benchmark.services.queries import add_query, list_queries
+from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.runs import (
     list_results_for_experiment,
     list_runs,
@@ -57,6 +58,11 @@ class RunRequest(BaseModel):
 @app.get("/published", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text())
+
+
+@app.get("/view/{experiment_id}/{run_id}/{query_id}", response_class=HTMLResponse)
+def stl_viewer() -> HTMLResponse:
+    return HTMLResponse((STATIC_DIR / "stl-viewer.html").read_text())
 
 
 @app.get("/api/experiments")
@@ -125,6 +131,25 @@ def api_publish_experiment(experiment_id: str, run_id: str | None = None) -> dic
         raise _http_error(exc) from exc
 
 
+@app.get("/api/experiments/{experiment_id}/runs/{run_id}/queries/{query_id}")
+def api_get_run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:
+    try:
+        return _run_query(experiment_id, run_id, query_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.get("/api/experiments/{experiment_id}/runs/{run_id}/queries/{query_id}/stl")
+def api_get_run_query_stl(experiment_id: str, run_id: str, query_id: str) -> FileResponse:
+    try:
+        stl_path = _query_stl_path(experiment_id, run_id, query_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    if not stl_path.exists():
+        raise HTTPException(status_code=404, detail="STL artifact not found.")
+    return FileResponse(stl_path, media_type="model/stl", filename="model.stl")
+
+
 @app.get("/api/published")
 def api_list_published() -> list[dict[str, Any]]:
     settings = get_settings()
@@ -185,3 +210,53 @@ def _stored_path(path: Path) -> str:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:
+    run = get_run(experiment_id, run_id)
+    query = _find_run_query(run, query_id)
+    stl_path = _resolve_query_stl_path(query)
+    return {
+        **query,
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "has_stl": bool(stl_path and stl_path.exists()),
+    }
+
+
+def _find_run_query(run: dict[str, Any], query_id: str) -> dict[str, Any]:
+    for query in run.get("queries", []):
+        if query.get("query_id") == query_id:
+            return query
+    raise ValueError(f"Query not found: {query_id}")
+
+
+def _query_stl_path(experiment_id: str, run_id: str, query_id: str) -> Path:
+    run = get_run(experiment_id, run_id)
+    query = _find_run_query(run, query_id)
+    stl_path = _resolve_query_stl_path(query)
+    if stl_path is None:
+        raise ValueError(f"Query {query_id} has no STL artifact.")
+    return stl_path
+
+
+def _resolve_query_stl_path(query: dict[str, Any]) -> Path | None:
+    if query.get("status") != "completed":
+        return None
+    artifact_dir = _resolve_path(query["artifact_dir"])
+    _ensure_workspace_path(artifact_dir)
+    return artifact_dir / "model.stl"
+
+
+def _resolve_path(path: str) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    return candidate
+
+
+def _ensure_workspace_path(path: Path) -> None:
+    workspace = get_settings().workspace_dir.resolve()
+    resolved = path.resolve()
+    if resolved != workspace and workspace not in resolved.parents:
+        raise ValueError("Artifact path is outside the workspace.")

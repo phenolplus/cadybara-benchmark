@@ -20,6 +20,8 @@ After every code change, the agent MUST:
 3. **View console output** — inspect for errors, warnings, or unexpected output
 4. **Screenshot affected pages** — when the change touches UI, take a screenshot to visually verify the result
 
+If the change is entirely UI-related and only browser-related code was changed, do not test the web app by running the server unless the user explicitly asks you to do so. Instead, verify whether the web app is already running and notify the user of that status.
+
 ### Git commits
 
 When creating commits, use [Conventional Commits](https://www.conventionalcommits.org/):

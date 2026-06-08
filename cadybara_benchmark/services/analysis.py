@@ -27,7 +27,6 @@ def analyze_experiment(experiment_id: str, settings: Settings | None = None) -> 
             raw_output = loads_json(response_path.read_text(), {}) if response_path.exists() else {}
             query_payload = {
                 "experiment_id": run["experiment_id"],
-                "sublabel": query.get("sublabel", ""),
                 "text": query.get("text", ""),
                 "model": query.get("model", ""),
             }

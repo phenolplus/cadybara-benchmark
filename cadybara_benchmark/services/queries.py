@@ -14,7 +14,6 @@ def add_query(
     text: str,
     category: str | None = None,
     model: str | None = None,
-    sublabel: str | None = None,
     metadata: dict[str, Any] | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
@@ -23,7 +22,6 @@ def add_query(
     query = {
         "id": query_id,
         "experiment_id": experiment_id,
-        "sublabel": sublabel or query_id,
         "text": text,
         "model": model or "",
         "category": category or "",
@@ -60,7 +58,6 @@ def get_query(
 def _stored_query(query: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": query["id"],
-        "sublabel": query.get("sublabel", query["id"]),
         "text": query["text"],
         "model": query.get("model", ""),
         "category": query.get("category", ""),
@@ -72,7 +69,6 @@ def _with_experiment_id(query: dict[str, Any], experiment_id: str) -> dict[str, 
     return {
         "id": query["id"],
         "experiment_id": experiment_id,
-        "sublabel": query.get("sublabel", query["id"]),
         "text": query.get("text", ""),
         "model": query.get("model", ""),
         "category": query.get("category", ""),

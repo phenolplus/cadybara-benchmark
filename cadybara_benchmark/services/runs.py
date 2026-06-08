@@ -101,10 +101,8 @@ def run_experiment(
     for query in queries:
         query_model = query.get("model") or default_model
         full_parameters = {**base_parameters, "model": query_model}
-        query_sublabel = query.get("sublabel") or query["id"]
         query_entry: dict[str, Any] = {
             "query_id": query["id"],
-            "sublabel": query_sublabel,
             "text": query["text"],
             "model": query_model,
             "status": "running",
@@ -120,7 +118,7 @@ def run_experiment(
         if on_event:
             on_event(
                 "started",
-                {"run_id": run_id, "query_id": query["id"], "query_sublabel": query_sublabel},
+                {"run_id": run_id, "query_id": query["id"]},
             )
 
         artifact_dir = run_dir(experiment_id, run_id, settings) / query["id"]
@@ -143,7 +141,7 @@ def run_experiment(
             if on_event:
                 on_event(
                     "completed",
-                    {"run_id": run_id, "query_id": query["id"], "query_sublabel": query_sublabel},
+                    {"run_id": run_id, "query_id": query["id"]},
                 )
         except CadybaraApiError as exc:
             error_path = artifact_dir / "error.json"
@@ -157,7 +155,6 @@ def run_experiment(
                     {
                         "run_id": run_id,
                         "query_id": query["id"],
-                        "query_sublabel": query_sublabel,
                         "error": exc.payload,
                     },
                 )
@@ -174,7 +171,6 @@ def run_experiment(
                     {
                         "run_id": run_id,
                         "query_id": query["id"],
-                        "query_sublabel": query_sublabel,
                         "error": error,
                     },
                 )
@@ -207,7 +203,6 @@ def _query_result(run: dict[str, Any], query: dict[str, Any]) -> dict[str, Any]:
         "id": f"{run['id']}:{query['query_id']}",
         "run_id": run["id"],
         "query_id": query["query_id"],
-        "sublabel": query.get("sublabel", ""),
         "text": query.get("text", ""),
         "model": query.get("model", ""),
         "response_metadata": query.get("response_metadata", {}),

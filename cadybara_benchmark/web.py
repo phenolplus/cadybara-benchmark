@@ -42,7 +42,6 @@ class ExperimentCreate(BaseModel):
 
 class QueryCreate(BaseModel):
     text: str = Field(min_length=1)
-    sublabel: str | None = None
     model: str | None = None
     category: str | None = None
     metadata: dict[str, Any] | None = None
@@ -114,7 +113,6 @@ def api_add_query(experiment_id: str, payload: QueryCreate) -> dict[str, Any]:
             payload.text,
             category=payload.category,
             model=payload.model,
-            sublabel=payload.sublabel,
             metadata=payload.metadata,
         )
     except Exception as exc:

@@ -63,7 +63,6 @@ def dumps_experiment_yaml(experiment: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"  - id: {_format_scalar(query['id'])}",
-                f"    sublabel: {_format_scalar(query.get('sublabel', query['id']))}",
                 f"    text: {_format_scalar(query.get('text', ''))}",
                 f"    model: {_format_scalar(query.get('model', ''))}",
                 f"    category: {_format_scalar(query.get('category', ''))}",

@@ -180,12 +180,11 @@ function queriesTable(queries) {
   return `
     <div class="table-responsive">
       <table class="table">
-        <thead><tr><th>ID</th><th>Sublabel</th><th>Model</th><th>Category</th><th>Text</th></tr></thead>
+        <thead><tr><th>ID</th><th>Model</th><th>Category</th><th>Text</th></tr></thead>
         <tbody>
           ${queries.map((query) => `
             <tr>
               <td class="fw-semibold">${escapeHtml(query.id)}</td>
-              <td>${escapeHtml(query.sublabel || "")}</td>
               <td class="small">${escapeHtml(query.model || "(default)")}</td>
               <td>${escapeHtml(query.category || "")}</td>
               <td class="query-text">${escapeHtml(query.text || "")}</td>
@@ -241,7 +240,7 @@ function runRows(run, experimentId) {
 function runQueriesTable(queries, experimentId, runId) {
   return `
     <table class="table table-sm mb-0 run-queries-table">
-      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Client latency</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
+      <thead><tr><th>Query</th><th>Model</th><th>Status</th><th>Score</th><th>Client latency</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
       <tbody>
         ${queries.map((query) => {
           const queryId = query.query_id || query.id || "";
@@ -249,7 +248,6 @@ function runQueriesTable(queries, experimentId, runId) {
           return `
           <tr>
             <td class="fw-semibold">${escapeHtml(queryId)}</td>
-            <td>${escapeHtml(query.sublabel || "")}</td>
             <td class="small">${escapeHtml(query.model || "")}</td>
             <td>${statusBadge(query.status)}</td>
             <td>${query.score !== null && query.score !== undefined ? query.score : ""}</td>
@@ -391,11 +389,7 @@ function queryModal(experimentId) {
           </div>
           <div class="modal-body">
             <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label">Sublabel</label>
-                <input class="form-control" name="sublabel">
-              </div>
-              <div class="col-md-6">
+              <div class="col-12">
                 <label class="form-label">Category</label>
                 <input class="form-control" name="category">
               </div>

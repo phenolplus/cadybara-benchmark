@@ -28,7 +28,7 @@ async function initViewer() {
       `/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/queries/${encodeURIComponent(queryId)}`,
     );
     meta.textContent = `${experimentId} · ${runId} · ${query.query_id || queryId}`;
-    title.textContent = query.sublabel || query.query_id || queryId;
+    title.textContent = query.query_id || queryId;
     const latencyMs = getClientLatencyMs(query);
     text.textContent = query.text || "";
     if (latencyMs !== null) {

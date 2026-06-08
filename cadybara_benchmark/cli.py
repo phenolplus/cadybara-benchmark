@@ -84,10 +84,9 @@ def add_query(
     text: Annotated[str | None, typer.Option(prompt=True)] = None,
     category: Annotated[str, typer.Option()] = "",
     model: Annotated[str | None, typer.Option()] = None,
-    sublabel: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     try:
-        query = add_query_service(experiment_id, text or "", category, model, sublabel)
+        query = add_query_service(experiment_id, text or "", category, model)
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         _handle_error(exc)
@@ -104,15 +103,14 @@ def list_queries(experiment_id: str) -> None:
     if not queries:
         typer.echo("No queries found.")
         return
-    typer.echo("ID    SUBLABEL             MODEL                           CATEGORY          TEXT")
+    typer.echo("ID    MODEL                           CATEGORY          TEXT")
     for query in queries:
         text = query["text"]
         if len(text) > 80:
             text = f"{text[:77]}..."
         model = query["model"] or "(default)"
         typer.echo(
-            f"{query['id']:<5} {query['sublabel']:<20} {model:<31} "
-            f"{query['category']:<17} {text}"
+            f"{query['id']:<5} {model:<31} {query['category']:<17} {text}"
         )
 
 
@@ -136,12 +134,12 @@ def run(
         def progress(event: str, payload: dict) -> None:
             if event == "started":
                 typer.echo(
-                    f"Started {payload['query_sublabel']} in {payload['run_id']}"
+                    f"Started {payload['query_id']} in {payload['run_id']}"
                 )
             elif event == "completed":
-                typer.echo(f"Completed {payload['query_sublabel']} in {payload['run_id']}")
+                typer.echo(f"Completed {payload['query_id']} in {payload['run_id']}")
             elif event == "failed":
-                typer.echo(f"Failed {payload['query_sublabel']} in {payload['run_id']}")
+                typer.echo(f"Failed {payload['query_id']} in {payload['run_id']}")
 
         summary = run_experiment(
             experiment_id, model, parameters, settings=settings, on_event=progress

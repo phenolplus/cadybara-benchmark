@@ -20,15 +20,12 @@ def test_add_query_validates_and_lists(settings):
         "Create a cube.",
         "mechanical",
         model="google/gemini-3-flash-preview",
-        sublabel="cube-baseline",
         settings=settings,
     )
 
     assert query["id"] == "Q001"
-    assert query["sublabel"] == "cube-baseline"
     assert query["model"] == "google/gemini-3-flash-preview"
     assert list_queries("EXP001", settings)[0]["text"] == "Create a cube."
-    assert list_queries("EXP001", settings)[0]["sublabel"] == "cube-baseline"
     assert list_queries("EXP001", settings)[0]["model"] == "google/gemini-3-flash-preview"
     assert get_experiment("EXP001", settings)["name"] == "Bracket Query Comparison"
     assert get_experiment("EXP001", settings)["queries"][0]["id"] == "Q001"

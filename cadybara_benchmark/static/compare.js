@@ -107,7 +107,7 @@ function createBlockShell(item) {
       </div>
       <div>
         <div class="label">Query</div>
-        <div class="value fw-semibold">${escapeHtml(queryId)}${query.sublabel ? ` · ${escapeHtml(query.sublabel)}` : ""}</div>
+        <div class="value fw-semibold">${escapeHtml(queryId)}</div>
       </div>
       <div>
         <div class="label">Model</div>

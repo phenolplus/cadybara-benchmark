@@ -57,13 +57,12 @@ class FakeClient:
 
 def test_run_analyze_and_publish(settings):
     create_experiment("Bracket Query Comparison", settings=settings)
-    add_query("EXP001", "Create a cube.", "mechanical", sublabel="cube-default", settings=settings)
+    add_query("EXP001", "Create a cube.", "mechanical", settings=settings)
     add_query(
         "EXP001",
         "Create a sphere.",
         "mechanical",
         model="google/gemini-3-flash-preview",
-        sublabel="sphere-gemini",
         settings=settings,
     )
 
@@ -88,10 +87,6 @@ def test_run_analyze_and_publish(settings):
     assert [query["model"] for query in run["queries"]] == [
         "google/gemini-3-flash-preview",
         "google/gemini-3-flash-preview",
-    ]
-    assert [query["sublabel"] for query in run["queries"]] == [
-        "cube-default",
-        "sphere-gemini",
     ]
     assert [query["text"] for query in run["queries"]] == [
         "Create a cube.",
@@ -144,8 +139,8 @@ def test_run_uses_query_model_over_experiment_default(settings):
         },
         settings=settings,
     )
-    add_query("EXP001", "Create a cube.", sublabel="cube", settings=settings)
-    add_query("EXP001", "Create a sphere.", model="query-model", sublabel="sphere", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", model="query-model", settings=settings)
 
     client = FakeClient()
     run_experiment("EXP001", client=client, settings=settings)
@@ -158,10 +153,6 @@ def test_run_uses_query_model_over_experiment_default(settings):
     assert [query["model"] for query in run["queries"]] == [
         "default-model",
         "query-model",
-    ]
-    assert [query["sublabel"] for query in run["queries"]] == [
-        "cube",
-        "sphere",
     ]
 
 

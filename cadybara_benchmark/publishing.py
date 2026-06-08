@@ -46,7 +46,6 @@ def publish_experiment(
             shutil.copy2(stl_path, destination)
             published_entry: dict[str, Any] = {
                 "query_id": query["query_id"],
-                "sublabel": query.get("sublabel", ""),
                 "text": query.get("text", ""),
                 "model": query.get("model", ""),
                 "stl_paths": [_stored_path(destination)],

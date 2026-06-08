@@ -414,7 +414,6 @@ created_at: "2026-06-05T12:00:00Z"
 updated_at: "2026-06-05T12:00:00Z"
 queries:
   - id: "Q001"
-    sublabel: "bracket-gemini"
     text: "Create a 100x50x4 mm symmetric mounting bracket with four equally spaced holes."
     model: "google/gemini-3-flash-preview"
     category: "mechanical"
@@ -429,14 +428,12 @@ queries:
 
 Represents a user-identified query line within an experiment. Queries are nested in the experiment YAML file and remain independent from model and parameter choices so the same query can be run against multiple configurations.
 
-Each query line has a `sublabel` for experiment-local categorization. Runs store per-query snapshots in `summary.json` and detail artifacts in query subfolders.
+Runs store per-query snapshots in `summary.json` and detail artifacts in query subfolders.
 
 Fields:
 
 ```text
 id
-
-sublabel
 
 text
 
@@ -451,7 +448,6 @@ Example:
 
 ```yaml
 - id: "Q001"
-  sublabel: "bracket-gemini"
   text: "Create a 100x50x4 mm symmetric mounting bracket with four equally spaced holes."
   model: "google/gemini-3-flash-preview"
   category: "mechanical"
@@ -488,8 +484,6 @@ Each entry in `queries` stores:
 
 ```text
 query_id
-
-sublabel
 
 text
 
@@ -543,7 +537,6 @@ Example summary excerpt:
     "queries":[
         {
             "query_id":"Q001",
-            "sublabel":"bracket-gemini",
             "text":"Create a 100x50x4 mm symmetric mounting bracket with four equally spaced holes.",
             "model":"google/gemini-3-flash-preview",
             "status":"completed",
@@ -740,7 +733,6 @@ Example:
     "queries":[
         {
             "query_id":"Q001",
-            "sublabel":"bracket-gemini",
             "text":"Create a 100x50x4 mm symmetric mounting bracket with four equally spaced holes.",
             "model":"google/gemini-3-flash-preview",
             "stl_paths":[

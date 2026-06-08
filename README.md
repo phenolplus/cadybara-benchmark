@@ -48,7 +48,7 @@ published/runs/
 
 ## Experiment YAML Format
 
-Each query line may specify a model and a `sublabel`. If `model` is empty, the query uses `setup.model`.
+Each query line may specify a model. If `model` is empty, the query uses `setup.model`.
 
 ```yaml
 id: "EXP001"
@@ -65,14 +65,13 @@ created_at: "2026-06-07T19:40:47Z"
 updated_at: "2026-06-07T19:40:47Z"
 queries:
   - id: "Q001"
-    sublabel: "snowman-gemini-flash"
     text: "design a three-tier cubic snowman with slightly soft edges"
     model: "google/gemini-3-flash-preview"
     category: ""
     metadata: {}
 ```
 
-Runs are associated with the experiment. Each run executes all query lines in that experiment and stores per-query snapshots (sublabel, text, model) in `summary.json` plus detail artifacts in query subfolders.
+Runs are associated with the experiment. Each run executes all query lines in that experiment and stores per-query snapshots (text, model) in `summary.json` plus detail artifacts in query subfolders.
 
 ## Common Workflow
 
@@ -89,18 +88,15 @@ Add query lines, one per model:
 ```bash
 cadybara-benchmark add-query EXP001 \
   --text "design a three-tier cubic snowman with slightly soft edges" \
-  --model "google/gemini-3-flash-preview" \
-  --sublabel "snowman-gemini-flash"
+  --model "google/gemini-3-flash-preview"
 
 cadybara-benchmark add-query EXP001 \
   --text "design a three-tier cubic snowman with slightly soft edges" \
-  --model "gpt-5.4-mini" \
-  --sublabel "snowman-gpt-5-4-mini"
+  --model "gpt-5.4-mini"
 
 cadybara-benchmark add-query EXP001 \
   --text "design a three-tier cubic snowman with slightly soft edges" \
-  --model "gpt-5.5" \
-  --sublabel "snowman-gpt-5-5"
+  --model "gpt-5.5"
 ```
 
 Inspect the experiment:

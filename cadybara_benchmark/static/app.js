@@ -200,7 +200,7 @@ function runsTable(runs, experimentId) {
   return `
     <div class="table-responsive">
       <table class="table runs-table">
-        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Avg client latency</th><th>Started</th><th></th></tr></thead>
+        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg client latency</th><th>Started</th><th></th></tr></thead>
         <tbody>
           ${runs.map((run) => runRows(run, experimentId)).join("")}
         </tbody>
@@ -221,7 +221,6 @@ function runRows(run, experimentId) {
       <td class="fw-semibold">${escapeHtml(runId)}</td>
       <td>${statusBadge(run.status)}</td>
       <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
-      <td>${run.average_score !== null && run.average_score !== undefined ? run.average_score : ""}</td>
       <td class="text-body-secondary small">${formatClientLatency(run.average_client_latency_ms)}</td>
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
       <td class="text-nowrap">
@@ -230,7 +229,7 @@ function runRows(run, experimentId) {
       </td>
     </tr>
     <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
-      <td colspan="9">
+      <td colspan="8">
         ${queries.length ? runQueriesTable(queries, experimentId, runId) : `<div class="text-body-secondary small py-2">No query results.</div>`}
       </td>
     </tr>
@@ -240,7 +239,7 @@ function runRows(run, experimentId) {
 function runQueriesTable(queries, experimentId, runId) {
   return `
     <table class="table table-sm mb-0 run-queries-table">
-      <thead><tr><th>Query</th><th>Model</th><th>Status</th><th>Score</th><th>Client latency</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
+      <thead><tr><th>Query</th><th>Model</th><th>Status</th><th>Client latency</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
       <tbody>
         ${queries.map((query) => {
           const queryId = query.query_id || query.id || "";
@@ -250,7 +249,6 @@ function runQueriesTable(queries, experimentId, runId) {
             <td class="fw-semibold">${escapeHtml(queryId)}</td>
             <td class="small">${escapeHtml(query.model || "")}</td>
             <td>${statusBadge(query.status)}</td>
-            <td>${query.score !== null && query.score !== undefined ? query.score : ""}</td>
             <td class="text-body-secondary small">${formatClientLatency(getClientLatencyMs(query))}</td>
             <td class="metrics-cell">${formatMetrics(query.metrics)}</td>
             <td class="query-text">

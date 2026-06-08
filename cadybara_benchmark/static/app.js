@@ -130,6 +130,7 @@ async function renderExperiment(id) {
   `;
   bindExperimentActions(experiment.id);
   bindQueryForm(experiment.id);
+  bindRunsTable();
 }
 
 async function renderPublished() {
@@ -193,23 +194,89 @@ function queriesTable(queries) {
 function runsTable(runs) {
   return `
     <div class="table-responsive">
-      <table class="table">
-        <thead><tr><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
+      <table class="table runs-table">
+        <thead><tr><th></th><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
         <tbody>
-          ${runs.map((run) => `
-            <tr>
-              <td class="fw-semibold">${escapeHtml(run.id)}</td>
-              <td>${statusBadge(run.status)}</td>
-              <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
-              <td>${run.average_score !== null && run.average_score !== undefined ? run.average_score : ""}</td>
-              <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
-              <td><button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(run.id)}')">Publish</button></td>
-            </tr>
-          `).join("")}
+          ${runs.map((run) => runRows(run)).join("")}
         </tbody>
       </table>
     </div>
   `;
+}
+
+function runRows(run) {
+  const queries = run.queries || [];
+  const runId = run.id;
+  return `
+    <tr class="run-row" data-run-id="${escapeAttr(runId)}" role="button" tabindex="0" aria-expanded="false" aria-controls="run-detail-${escapeAttr(runId)}">
+      <td class="run-toggle-cell"><span class="run-toggle" aria-hidden="true">▸</span></td>
+      <td class="fw-semibold">${escapeHtml(runId)}</td>
+      <td>${statusBadge(run.status)}</td>
+      <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
+      <td>${run.average_score !== null && run.average_score !== undefined ? run.average_score : ""}</td>
+      <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
+      <td><button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button></td>
+    </tr>
+    <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
+      <td colspan="7">
+        ${queries.length ? runQueriesTable(queries) : `<div class="text-body-secondary small py-2">No query results.</div>`}
+      </td>
+    </tr>
+  `;
+}
+
+function runQueriesTable(queries) {
+  return `
+    <table class="table table-sm mb-0 run-queries-table">
+      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Text</th></tr></thead>
+      <tbody>
+        ${queries.map((query) => `
+          <tr>
+            <td class="fw-semibold">${escapeHtml(query.query_id || query.id || "")}</td>
+            <td>${escapeHtml(query.sublabel || "")}</td>
+            <td class="small">${escapeHtml(query.model || "")}</td>
+            <td>${statusBadge(query.status)}</td>
+            <td>${query.score !== null && query.score !== undefined ? query.score : ""}</td>
+            <td class="query-text">
+              ${escapeHtml(query.text || "")}
+              ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function bindRunsTable() {
+  const table = document.querySelector(".runs-table");
+  if (!table) return;
+
+  table.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    const row = event.target.closest(".run-row");
+    if (!row) return;
+    toggleRunRow(row.dataset.runId);
+  });
+
+  table.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".run-row");
+    if (!row) return;
+    event.preventDefault();
+    toggleRunRow(row.dataset.runId);
+  });
+}
+
+function toggleRunRow(runId) {
+  const row = document.querySelector(`.run-row[data-run-id="${runId}"]`);
+  const detail = document.querySelector(`.run-detail-row[data-run-id="${runId}"]`);
+  if (!row || !detail) return;
+
+  const expanded = row.getAttribute("aria-expanded") === "true";
+  row.setAttribute("aria-expanded", expanded ? "false" : "true");
+  row.classList.toggle("expanded", !expanded);
+  detail.classList.toggle("d-none", expanded);
 }
 
 function publishedTable(items) {
@@ -381,6 +448,12 @@ function statusBadge(status) {
 
 function blankToNull(data) {
   return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === "" ? null : value]));
+}
+
+function formatError(error) {
+  if (typeof error === "string") return error;
+  if (error && typeof error.message === "string") return error.message;
+  return JSON.stringify(error);
 }
 
 function showAlert(message, type = "info") {

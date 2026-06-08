@@ -138,6 +138,7 @@ def run_experiment(
                 code_path.write_text(result.generated_code)
             query_entry["status"] = "completed"
             query_entry["response_metadata"] = result.response_metadata
+            query_entry["metrics"] = result.raw_response.get("metrics", {})
             completed += 1
             if on_event:
                 on_event(

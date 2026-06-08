@@ -65,6 +65,7 @@ def stl_viewer() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "stl-viewer.html").read_text())
 
 
+@app.get("/compare/{experiment_id}", response_class=HTMLResponse)
 @app.get("/compare/{experiment_id}/{run_id}", response_class=HTMLResponse)
 def compare_viewer() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "compare.html").read_text())
@@ -198,13 +199,14 @@ def _experiment_summary(experiment: dict[str, Any]) -> dict[str, Any]:
 
 
 def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
-    queries = run.get("queries", [])
+    queries = [_with_query_artifact_data(query) for query in run.get("queries", [])]
     completed = len([query for query in queries if query.get("status") == "completed"])
     failed = len([query for query in queries if query.get("status") == "failed"])
     scores = [query["score"] for query in queries if query.get("score") is not None]
     average_score = sum(scores) / len(scores) if scores else None
     return {
         **run,
+        "queries": queries,
         "query_count": len(queries),
         "completed_count": completed,
         "failed_count": failed,
@@ -229,6 +231,7 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
     run = get_run(experiment_id, run_id)
     queries = []
     for query in run.get("queries", []):
+        query = _with_query_artifact_data(query)
         stl_path = _resolve_query_stl_path(query)
         queries.append(
             {
@@ -245,7 +248,7 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
 
 def _run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:
     run = get_run(experiment_id, run_id)
-    query = _find_run_query(run, query_id)
+    query = _with_query_artifact_data(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     return {
         **query,
@@ -264,11 +267,33 @@ def _find_run_query(run: dict[str, Any], query_id: str) -> dict[str, Any]:
 
 def _query_stl_path(experiment_id: str, run_id: str, query_id: str) -> Path:
     run = get_run(experiment_id, run_id)
-    query = _find_run_query(run, query_id)
+    query = _with_query_artifact_data(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     if stl_path is None:
         raise ValueError(f"Query {query_id} has no STL artifact.")
     return stl_path
+
+
+def _with_query_artifact_data(query: dict[str, Any]) -> dict[str, Any]:
+    hydrated = dict(query)
+    if hydrated.get("metrics"):
+        return hydrated
+    artifact_dir_value = hydrated.get("artifact_dir")
+    if not artifact_dir_value:
+        return hydrated
+    artifact_dir = _resolve_path(artifact_dir_value)
+    _ensure_workspace_path(artifact_dir)
+    response_path = artifact_dir / "response.json"
+    if not response_path.exists():
+        return hydrated
+    try:
+        response = json.loads(response_path.read_text())
+    except json.JSONDecodeError:
+        return hydrated
+    metrics = response.get("metrics") if isinstance(response, dict) else None
+    if isinstance(metrics, dict):
+        hydrated["metrics"] = metrics
+    return hydrated
 
 
 def _resolve_query_stl_path(query: dict[str, Any]) -> Path | None:

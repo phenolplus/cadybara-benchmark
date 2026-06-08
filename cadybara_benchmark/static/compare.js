@@ -6,7 +6,15 @@ const savedTheme = localStorage.getItem("theme") || "light";
 document.documentElement.dataset.bsTheme = savedTheme;
 
 const pathParts = window.location.pathname.split("/").filter(Boolean);
-const [experimentId, runId] = pathParts.slice(1);
+const [experimentId, legacyRunId] = pathParts.slice(1);
+const searchParams = new URLSearchParams(window.location.search);
+const selectedRunIds = searchParams.getAll("run");
+const compactRunIds = searchParams.get("runs");
+const runIds = [
+  ...selectedRunIds,
+  ...(compactRunIds ? compactRunIds.split(",") : []),
+  ...(legacyRunId ? [legacyRunId] : []),
+].filter(Boolean);
 
 const compareMeta = document.querySelector("#compareMeta");
 const compareGrid = document.querySelector("#compareGrid");
@@ -14,10 +22,17 @@ const compareStatus = document.querySelector("#compareStatus");
 const backLink = document.querySelector("#backLink");
 
 const backgroundColor = savedTheme === "dark" ? 0x15181c : 0xf8f9fb;
-const meshColor = savedTheme === "dark" ? 0x6ea8fe : 0x356aa6;
+const runPalette = [
+  { light: 0x356aa6, dark: 0x6ea8fe, swatch: "#356aa6" },
+  { light: 0x287a5e, dark: 0x62d6a7, swatch: "#287a5e" },
+  { light: 0xb25c2a, dark: 0xffa45c, swatch: "#b25c2a" },
+  { light: 0x7a5bb6, dark: 0xc7a6ff, swatch: "#7a5bb6" },
+  { light: 0xb44f6f, dark: 0xff8fb1, swatch: "#b44f6f" },
+  { light: 0x6f6a22, dark: 0xd9cf54, swatch: "#6f6a22" },
+];
 
-if (!experimentId || !runId) {
-  showStatus("Missing experiment or run id in the URL.", true);
+if (!experimentId || !runIds.length) {
+  showStatus("Missing experiment or run selection in the URL.", true);
 } else {
   backLink.href = `/experiment/${encodeURIComponent(experimentId)}`;
   initCompare();
@@ -25,22 +40,32 @@ if (!experimentId || !runId) {
 
 async function initCompare() {
   try {
-    const run = await fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}`);
-    const queries = run.queries || [];
-    compareMeta.textContent = `${experimentId} · ${runId} · ${queries.length} quer${queries.length === 1 ? "y" : "ies"}`;
+    const uniqueRunIds = Array.from(new Set(runIds));
+    const runs = await Promise.all(
+      uniqueRunIds.map((runId) => fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}`)),
+    );
+    const compareItems = runs.flatMap((run, runIndex) =>
+      (run.queries || []).map((query) => ({
+        query,
+        run,
+        runIndex,
+        color: runColor(runIndex),
+      })),
+    );
+    compareMeta.textContent = `${experimentId} · ${runs.length} run${runs.length === 1 ? "" : "s"} · ${compareItems.length} quer${compareItems.length === 1 ? "y" : "ies"}`;
 
-    if (!queries.length) {
-      showStatus("This run has no queries to compare.", true);
+    if (!compareItems.length) {
+      showStatus("The selected runs have no queries to compare.", true);
       return;
     }
 
     compareGrid.replaceChildren();
-    const blocks = queries.map((query) => {
-      const { element, host } = createBlockShell(query);
+    const blocks = compareItems.map((item) => {
+      const { element, host } = createBlockShell(item);
       compareGrid.append(element);
-      return { query, host };
+      return { item, host };
     });
-    const viewports = await Promise.all(blocks.map(({ query, host }, index) => createViewport(query, host, index)));
+    const viewports = await Promise.all(blocks.map(({ item, host }, index) => createViewport(item, host, index)));
     setupViewportResize(viewports);
     setupSyncedControls(viewports);
     fitAllCameras(viewports);
@@ -51,10 +76,12 @@ async function initCompare() {
   }
 }
 
-function createBlockShell(query) {
+function createBlockShell(item) {
+  const { query, run, color } = item;
   const queryId = query.query_id || query.id || "";
   const block = document.createElement("article");
   block.className = "compare-block";
+  block.style.setProperty("--run-color", color.swatch);
   const host = document.createElement("div");
   const isEmpty = query.status !== "completed";
   host.className = `compare-viewport${isEmpty ? " is-empty" : ""}`;
@@ -75,6 +102,10 @@ function createBlockShell(query) {
     metaFromHtml(`
     <div class="compare-meta">
       <div>
+        <div class="label">Run</div>
+        <div class="value run-value fw-semibold"><span class="run-swatch" aria-hidden="true"></span>${escapeHtml(run.id || "")}</div>
+      </div>
+      <div>
         <div class="label">Query</div>
         <div class="value fw-semibold">${escapeHtml(queryId)}${query.sublabel ? ` · ${escapeHtml(query.sublabel)}` : ""}</div>
       </div>
@@ -86,6 +117,7 @@ function createBlockShell(query) {
         <div class="label">Prompt</div>
         <div class="value">${escapeHtml(query.text || "")}</div>
       </div>
+      ${formatMetricsBlock(query.metrics)}
       ${query.status === "failed" ? `<div class="error">${escapeHtml(formatError(query.error))}</div>` : ""}
     </div>
   `),
@@ -93,7 +125,8 @@ function createBlockShell(query) {
   return { element: block, host: stage };
 }
 
-async function createViewport(query, host, index) {
+async function createViewport(item, host, index) {
+  const { query, run, color } = item;
   const queryId = query.query_id || query.id || "";
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(backgroundColor);
@@ -121,7 +154,7 @@ async function createViewport(query, host, index) {
 
   if (query.status === "completed" && query.has_stl) {
     const geometry = await loadStl(
-      `/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/queries/${encodeURIComponent(queryId)}/stl`,
+      `/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(run.id)}/queries/${encodeURIComponent(queryId)}/stl`,
     );
     geometry.computeVertexNormals();
     geometry.center();
@@ -131,7 +164,7 @@ async function createViewport(query, host, index) {
     maxDim = Math.max(size.x, size.y, size.z, 0.001);
 
     const material = new THREE.MeshStandardMaterial({
-      color: meshColor,
+      color: savedTheme === "dark" ? color.dark : color.light,
       metalness: 0.12,
       roughness: 0.58,
     });
@@ -140,6 +173,10 @@ async function createViewport(query, host, index) {
   }
 
   return { index, scene, camera, renderer, controls, mesh, maxDim, host };
+}
+
+function runColor(index) {
+  return runPalette[index % runPalette.length];
 }
 
 function resizeViewport(viewport) {
@@ -240,6 +277,34 @@ function formatError(error) {
   if (typeof error === "string") return error;
   if (error && typeof error.message === "string") return error.message;
   return JSON.stringify(error);
+}
+
+function formatMetricsBlock(metrics) {
+  if (!metrics || typeof metrics !== "object" || !Object.keys(metrics).length) return "";
+  return `
+    <div>
+      <div class="label">Metrics</div>
+      <dl class="metrics-list">
+        ${Object.entries(metrics).map(([key, value]) => `
+          <div>
+            <dt>${escapeHtml(formatMetricLabel(key))}</dt>
+            <dd>${escapeHtml(formatMetricValue(value))}</dd>
+          </div>
+        `).join("")}
+      </dl>
+    </div>
+  `;
+}
+
+function formatMetricLabel(key) {
+  return String(key).replaceAll("_", " ");
+}
+
+function formatMetricValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
 }
 
 function showStatus(message, isError = false) {

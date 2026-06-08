@@ -50,6 +50,7 @@ function navigate(path) {
 }
 
 async function route() {
+  resetModalState();
   const path = window.location.pathname;
   if (path === "/" || path === "/experiments") {
     await renderExperiments();
@@ -120,6 +121,11 @@ async function renderExperiment(id) {
         </section>
       </div>
       <div class="col-12">
+        ${experiment.runs.length ? `
+          <div class="run-compare-toolbar">
+            <button class="btn btn-outline-primary" id="compareSelectedRuns" disabled>Compare runs</button>
+          </div>
+        ` : ""}
         <section class="panel overflow-hidden">
           <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
           ${experiment.runs.length ? runsTable(experiment.runs, experiment.id) : `<div class="empty-state m-3">No runs recorded.</div>`}
@@ -195,7 +201,7 @@ function runsTable(runs, experimentId) {
   return `
     <div class="table-responsive">
       <table class="table runs-table">
-        <thead><tr><th></th><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
+        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
         <tbody>
           ${runs.map((run) => runRows(run, experimentId)).join("")}
         </tbody>
@@ -210,6 +216,9 @@ function runRows(run, experimentId) {
   return `
     <tr class="run-row" data-run-id="${escapeAttr(runId)}" role="button" tabindex="0" aria-expanded="false" aria-controls="run-detail-${escapeAttr(runId)}">
       <td class="run-toggle-cell"><span class="run-toggle" aria-hidden="true">▸</span></td>
+      <td class="run-select-cell">
+        <input class="form-check-input run-select" type="checkbox" value="${escapeAttr(runId)}" aria-label="Select run ${escapeAttr(runId)}">
+      </td>
       <td class="fw-semibold">${escapeHtml(runId)}</td>
       <td>${statusBadge(run.status)}</td>
       <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
@@ -221,7 +230,7 @@ function runRows(run, experimentId) {
       </td>
     </tr>
     <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
-      <td colspan="7">
+      <td colspan="8">
         ${queries.length ? runQueriesTable(queries, experimentId, runId) : `<div class="text-body-secondary small py-2">No query results.</div>`}
       </td>
     </tr>
@@ -231,7 +240,7 @@ function runRows(run, experimentId) {
 function runQueriesTable(queries, experimentId, runId) {
   return `
     <table class="table table-sm mb-0 run-queries-table">
-      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Text</th><th></th></tr></thead>
+      <thead><tr><th>Query</th><th>Sublabel</th><th>Model</th><th>Status</th><th>Score</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
       <tbody>
         ${queries.map((query) => {
           const queryId = query.query_id || query.id || "";
@@ -243,6 +252,7 @@ function runQueriesTable(queries, experimentId, runId) {
             <td class="small">${escapeHtml(query.model || "")}</td>
             <td>${statusBadge(query.status)}</td>
             <td>${query.score !== null && query.score !== undefined ? query.score : ""}</td>
+            <td class="metrics-cell">${formatMetrics(query.metrics)}</td>
             <td class="query-text">
               ${escapeHtml(query.text || "")}
               ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
@@ -261,21 +271,52 @@ function runQueriesTable(queries, experimentId, runId) {
 function bindRunsTable() {
   const table = document.querySelector(".runs-table");
   if (!table) return;
+  const compareButton = document.querySelector("#compareSelectedRuns");
 
   table.addEventListener("click", (event) => {
-    if (event.target.closest("button, a")) return;
+    if (event.target.closest("button, a, input")) return;
     const row = event.target.closest(".run-row");
     if (!row) return;
     toggleRunRow(row.dataset.runId);
   });
 
+  table.addEventListener("change", (event) => {
+    if (!event.target.matches(".run-select")) return;
+    updateCompareRunsButton();
+  });
+
   table.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    if (event.target.closest("button, a, input")) return;
     const row = event.target.closest(".run-row");
     if (!row) return;
     event.preventDefault();
     toggleRunRow(row.dataset.runId);
   });
+
+  compareButton?.addEventListener("click", () => {
+    const selectedRunIds = selectedRunIdsForCompare();
+    if (!selectedRunIds.length) return;
+
+    const params = new URLSearchParams();
+    selectedRunIds.forEach((runId) => params.append("run", runId));
+    window.location.href = `/compare/${encodeURIComponent(state.current.id)}?${params.toString()}`;
+  });
+
+  updateCompareRunsButton();
+}
+
+function selectedRunIdsForCompare() {
+  return Array.from(document.querySelectorAll(".run-select:checked")).map((input) => input.value);
+}
+
+function updateCompareRunsButton() {
+  const compareButton = document.querySelector("#compareSelectedRuns");
+  if (!compareButton) return;
+
+  const count = selectedRunIdsForCompare().length;
+  compareButton.disabled = count === 0;
+  compareButton.textContent = count ? `Compare ${count} run${count === 1 ? "" : "s"}` : "Compare runs";
 }
 
 function toggleRunRow(runId) {
@@ -466,6 +507,31 @@ function formatError(error) {
   return JSON.stringify(error);
 }
 
+function formatMetrics(metrics) {
+  if (!metrics || typeof metrics !== "object" || !Object.keys(metrics).length) return "";
+  return `
+    <dl class="metrics-list">
+      ${Object.entries(metrics).map(([key, value]) => `
+        <div>
+          <dt>${escapeHtml(formatMetricLabel(key))}</dt>
+          <dd>${escapeHtml(formatMetricValue(value))}</dd>
+        </div>
+      `).join("")}
+    </dl>
+  `;
+}
+
+function formatMetricLabel(key) {
+  return String(key).replaceAll("_", " ");
+}
+
+function formatMetricValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function showAlert(message, type = "info") {
   const alert = document.createElement("div");
   alert.className = `alert alert-${type} alert-dismissible shadow-sm`;
@@ -503,6 +569,22 @@ function hideModal(modal) {
   modal.removeAttribute("aria-modal");
   document.body.classList.remove("modal-open");
   document.querySelectorAll("[data-local-backdrop='true']").forEach((backdrop) => backdrop.remove());
+}
+
+function resetModalState() {
+  document.querySelectorAll(".modal.show").forEach((modal) => {
+    if (window.bootstrap) {
+      bootstrap.Modal.getInstance(modal)?.dispose();
+    }
+    modal.classList.remove("show");
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    modal.removeAttribute("aria-modal");
+  });
+  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => backdrop.remove());
+  document.body.classList.remove("modal-open");
+  document.body.style.removeProperty("overflow");
+  document.body.style.removeProperty("padding-right");
 }
 
 function escapeHtml(value) {

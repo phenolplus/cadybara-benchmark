@@ -21,7 +21,16 @@ class FakeClient:
         return GenerateResult(
             stl_bytes=b"solid mock\nendsolid mock\n",
             generated_code="import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)",
-            raw_response={"generated_code": "import cadquery as cq", "stl_base64": "..."},
+            raw_response={
+                "generated_code": "import cadquery as cq",
+                "stl_base64": "...",
+                "metrics": {
+                    "credit_use": 100,
+                    "latency": 1.25,
+                    "steps": 4,
+                    "tool_calls": 9,
+                },
+            },
             response_metadata={"latency_ms": 100, "response_mode": "json"},
         )
 
@@ -88,3 +97,30 @@ def test_compare_page_and_run_payload(settings, monkeypatch):
     assert len(payload["queries"]) == 1
     assert payload["queries"][0]["has_stl"] is True
     assert payload["queries"][0]["text"] == "Create a cube."
+    assert payload["queries"][0]["metrics"] == {
+        "credit_use": 100,
+        "latency": 1.25,
+        "steps": 4,
+        "tool_calls": 9,
+    }
+
+
+def test_compare_renders_metrics_list():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert "${formatMetricsBlock(query.metrics)}" in script
+    assert '<div class="label">Metrics</div>' in script
+    assert 'Object.entries(metrics).map(([key, value])' in script
+
+
+def test_app_route_resets_modal_backdrop():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    route_start = script.index("async function route()")
+    route_body = script[route_start : script.index("async function renderExperiments()")]
+    assert "resetModalState();" in route_body
+
+    reset_start = script.index("function resetModalState()")
+    reset_body = script[reset_start : script.index("function escapeHtml")]
+    assert '".modal-backdrop"' in reset_body
+    assert '"modal-open"' in reset_body

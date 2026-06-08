@@ -77,6 +77,37 @@ body {
   white-space: normal;
 }
 
+.metrics-cell {
+  max-width: 18rem;
+  white-space: normal;
+}
+
+.metrics-list {
+  display: grid;
+  gap: .25rem;
+  margin: 0;
+}
+
+.metrics-list > div {
+  align-items: baseline;
+  display: flex;
+  gap: .5rem;
+  justify-content: space-between;
+}
+
+.metrics-list dt {
+  color: var(--bs-secondary-color);
+  font-size: .76rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.metrics-list dd {
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .code-box {
   background: var(--cb-muted-surface);
   border: 1px solid var(--cb-border);
@@ -107,6 +138,12 @@ body {
   cursor: pointer;
 }
 
+.run-compare-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: .75rem;
+}
+
 .run-row:hover {
   background: var(--cb-muted-surface);
 }
@@ -114,6 +151,10 @@ body {
 .run-toggle-cell {
   width: 1.75rem;
   padding-right: 0;
+}
+
+.run-select-cell {
+  width: 4.5rem;
 }
 
 .run-toggle {

@@ -33,6 +33,12 @@ class FakeClient:
                     "max_attempts": 3,
                 },
                 "response_mode": "json",
+                "metrics": {
+                    "credit_use": 100,
+                    "latency": 1.25,
+                    "steps": 4,
+                    "tool_calls": 9,
+                },
             },
             response_metadata={
                 "latency_ms": 100,
@@ -89,8 +95,18 @@ def test_run_analyze_and_publish(settings):
         "Create a cube.",
         "Create a sphere.",
     ]
+    assert [query["metrics"] for query in run["queries"]] == [
+        {"credit_use": 100, "latency": 1.25, "steps": 4, "tool_calls": 9},
+        {"credit_use": 100, "latency": 1.25, "steps": 4, "tool_calls": 9},
+    ]
 
     result = list_results_for_experiment("EXP001", settings)[0]
+    assert result["metrics"] == {
+        "credit_use": 100,
+        "latency": 1.25,
+        "steps": 4,
+        "tool_calls": 9,
+    }
     assert result["stl_paths"] == [
         str(settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001" / "model.stl")
     ]

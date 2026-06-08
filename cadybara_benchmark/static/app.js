@@ -88,6 +88,10 @@ async function renderExperiments() {
 async function renderExperiment(id) {
   state.current = await api(`/api/experiments/${id}`);
   const experiment = state.current;
+  renderExperimentPage(experiment);
+}
+
+function renderExperimentPage(experiment) {
   app.innerHTML = `
     <div class="page-header">
       <div>
@@ -239,7 +243,7 @@ function runRows(run, experimentId) {
 function runQueriesTable(queries, experimentId, runId) {
   return `
     <table class="table table-sm mb-0 run-queries-table">
-      <thead><tr><th>Query</th><th>Model</th><th>Status</th><th>Client latency</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
+      <thead><tr><th>Query</th><th>Model</th><th>Status</th><th>Metrics</th><th>Text</th><th></th></tr></thead>
       <tbody>
         ${queries.map((query) => {
           const queryId = query.query_id || query.id || "";
@@ -249,8 +253,7 @@ function runQueriesTable(queries, experimentId, runId) {
             <td class="fw-semibold">${escapeHtml(queryId)}</td>
             <td class="small">${escapeHtml(query.model || "")}</td>
             <td>${statusBadge(query.status)}</td>
-            <td class="text-body-secondary small">${formatClientLatency(getClientLatencyMs(query))}</td>
-            <td class="metrics-cell">${formatMetrics(query.metrics)}</td>
+            <td class="metrics-cell query-metrics-cell">${formatQueryMetrics(query)}</td>
             <td class="query-text">
               ${escapeHtml(query.text || "")}
               ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
@@ -440,18 +443,78 @@ function bindQueryForm(experimentId) {
 function bindExperimentActions(experimentId) {
   document.querySelector("#runExperiment").addEventListener("click", async () => {
     if (!confirm("Run this experiment against the Cadybara API now?")) return;
-    const result = await api(`/api/experiments/${experimentId}/run`, {
+    const runPromise = api(`/api/experiments/${experimentId}/run`, {
       method: "POST",
       body: JSON.stringify({}),
     });
-    showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
-    await renderExperiment(experimentId);
+
+    addOptimisticRun(experimentId);
+    showAlert("Run started.", "info");
+
+    try {
+      const result = await runPromise;
+      showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
+    } finally {
+      await renderExperiment(experimentId);
+    }
   });
   document.querySelector("#publishExperiment").addEventListener("click", async () => {
     const result = await api(`/api/experiments/${experimentId}/publish`, { method: "POST" });
     showAlert(`Published ${result.count} run(s).`, "success");
     await renderExperiment(experimentId);
   });
+}
+
+function addOptimisticRun(experimentId) {
+  if (!state.current || state.current.id !== experimentId) return;
+
+  const runId = nextOptimisticRunId(state.current.runs || []);
+  const startedAt = new Date().toISOString();
+  const setup = state.current.setup || {};
+  const defaultModel = setup.model || "default";
+  const queries = (state.current.queries || []).map((query) => ({
+    query_id: query.id,
+    text: query.text,
+    model: query.model || defaultModel,
+    status: "running",
+    error: {},
+    artifact_dir: "",
+    response_metadata: {},
+    score: null,
+    metrics: {},
+  }));
+
+  state.current = {
+    ...state.current,
+    status: "running",
+    runs: [
+      ...(state.current.runs || []),
+      {
+        id: runId,
+        experiment_id: experimentId,
+        status: "running",
+        started_at: startedAt,
+        finished_at: "",
+        parameters: {},
+        queries,
+        query_count: queries.length,
+        completed_count: 0,
+        failed_count: 0,
+        average_client_latency_ms: null,
+        summary: { completed: 0, failed: 0 },
+      },
+    ],
+  };
+
+  renderExperimentPage(state.current);
+}
+
+function nextOptimisticRunId(runs) {
+  const highest = runs.reduce((max, run) => {
+    const match = /^RUN(\d+)$/.exec(run.id || "");
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `RUN${String(highest + 1).padStart(3, "0")}`;
 }
 
 async function publishRun(runId) {
@@ -523,6 +586,27 @@ function formatMetrics(metrics) {
         <div>
           <dt>${escapeHtml(formatMetricLabel(key))}</dt>
           <dd>${escapeHtml(formatMetricValue(value))}</dd>
+        </div>
+      `).join("")}
+    </dl>
+  `;
+}
+
+function formatQueryMetrics(query) {
+  const entries = [
+    ["client latency", formatClientLatency(getClientLatencyMs(query))],
+    ...Object.entries(query.metrics || {}).map(([key, value]) => [
+      formatMetricLabel(key),
+      formatMetricValue(value),
+    ]),
+  ];
+
+  return `
+    <dl class="metrics-list">
+      ${entries.map(([key, value]) => `
+        <div>
+          <dt>${escapeHtml(key)}</dt>
+          <dd>${escapeHtml(value)}</dd>
         </div>
       `).join("")}
     </dl>

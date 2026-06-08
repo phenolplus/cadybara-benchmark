@@ -137,6 +137,17 @@ def test_app_renders_client_latency():
     assert "getClientLatencyMs" in script
 
 
+def test_app_optimistically_renders_started_run():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert "const runPromise = api" in script
+    assert "addOptimisticRun(experimentId);" in script
+    assert script.index("const runPromise = api") < script.index("addOptimisticRun(experimentId);")
+    assert "function nextOptimisticRunId" in script
+    assert 'status: "running"' in script
+    assert 'showAlert("Run started.", "info");' in script
+
+
 def test_compare_renders_metrics_list():
     script = (STATIC_DIR / "compare.js").read_text()
 

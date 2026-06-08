@@ -82,6 +82,12 @@ body {
   white-space: normal;
 }
 
+.query-metrics-cell {
+  min-width: 18rem;
+  max-width: 24rem;
+  width: 22rem;
+}
+
 .metrics-list {
   display: grid;
   gap: .25rem;
@@ -90,9 +96,9 @@ body {
 
 .metrics-list > div {
   align-items: baseline;
-  display: flex;
-  gap: .5rem;
-  justify-content: space-between;
+  display: grid;
+  gap: .75rem;
+  grid-template-columns: max-content max-content;
 }
 
 .metrics-list dt {

@@ -3,8 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from cadybara_benchmark.config import Settings, get_settings
-from cadybara_benchmark.db import connect, dumps_json, row_to_dict, rows_to_dicts
-from cadybara_benchmark.ids import next_id
+from cadybara_benchmark.experiment_files import (
+    load_experiment,
+    load_experiments,
+    save_experiment,
+)
+from cadybara_benchmark.ids import next_experiment_id
 from cadybara_benchmark.time import utc_now
 
 
@@ -27,53 +31,36 @@ def create_experiment(
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     now = utc_now()
-    with connect(settings) as conn:
-        experiment_id = next_id(conn, "experiments")
-        conn.execute(
-            """
-            INSERT INTO experiments (id, name, description, type, status, setup, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                experiment_id,
-                name,
-                description,
-                type,
-                "draft",
-                dumps_json(setup or default_setup(settings)),
-                now,
-                now,
-            ),
-        )
-        row = conn.execute("SELECT * FROM experiments WHERE id = ?", (experiment_id,)).fetchone()
-        return row_to_dict(row, "experiments")
+    experiment = {
+        "id": next_experiment_id(settings),
+        "name": name,
+        "description": description,
+        "type": type,
+        "status": "draft",
+        "setup": setup or default_setup(settings),
+        "created_at": now,
+        "updated_at": now,
+        "queries": [],
+    }
+    save_experiment(experiment, settings)
+    return experiment
 
 
 def list_experiments(settings: Settings | None = None) -> list[dict[str, Any]]:
-    with connect(settings) as conn:
-        rows = conn.execute("SELECT * FROM experiments ORDER BY created_at, id").fetchall()
-        return rows_to_dicts(rows, "experiments")
+    experiments = load_experiments(settings)
+    return sorted(experiments, key=lambda experiment: (experiment.get("created_at", ""), experiment["id"]))
 
 
 def get_experiment(experiment_id: str, settings: Settings | None = None) -> dict[str, Any]:
-    with connect(settings) as conn:
-        row = conn.execute("SELECT * FROM experiments WHERE id = ?", (experiment_id,)).fetchone()
-        experiment = row_to_dict(row, "experiments")
-    if experiment is None:
-        raise ValueError(f"Experiment not found: {experiment_id}")
-    return experiment
+    return load_experiment(experiment_id, settings)
 
 
 def update_experiment_status(
     experiment_id: str, status: str, settings: Settings | None = None
 ) -> dict[str, Any]:
     now = utc_now()
-    with connect(settings) as conn:
-        result = conn.execute(
-            "UPDATE experiments SET status = ?, updated_at = ? WHERE id = ?",
-            (status, now, experiment_id),
-        )
-        if result.rowcount == 0:
-            raise ValueError(f"Experiment not found: {experiment_id}")
-        row = conn.execute("SELECT * FROM experiments WHERE id = ?", (experiment_id,)).fetchone()
-        return row_to_dict(row, "experiments")
+    experiment = get_experiment(experiment_id, settings)
+    experiment["status"] = status
+    experiment["updated_at"] = now
+    save_experiment(experiment, settings)
+    return experiment

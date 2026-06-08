@@ -157,6 +157,18 @@ def test_compare_supports_block_reorder_and_minimize():
     assert "compare-minimized-stack" in script
 
 
+def test_compare_disables_camera_controls_for_dnf_viewports():
+    script = (STATIC_DIR / "compare.js").read_text()
+    css = (STATIC_DIR / "compare.css").read_text()
+
+    assert "function isDnfQuery" in script
+    assert "controls.enabled = !isDnf" in script
+    assert "if (viewport.isDnf) return" in script
+    assert "isDnf" in script
+    assert ".compare-viewport.is-empty .compare-viewport-stage" in css
+    assert "pointer-events: none" in css
+
+
 def test_app_route_resets_modal_backdrop():
     script = (STATIC_DIR / "app.js").read_text()
 

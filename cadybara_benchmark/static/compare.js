@@ -75,7 +75,7 @@ async function initCompare() {
     setupBlockInteractions(blocks, compareGrid);
     fitAllCameras(viewports);
     animate(viewports);
-    showStatus("Drag a block handle to reorder. Drag any viewport to rotate all models together.");
+    showStatus("Drag a block handle to reorder. Drag a model viewport to rotate all models together.");
   } catch (error) {
     showStatus(error.message, true);
   }
@@ -116,7 +116,7 @@ function createBlockShell(item) {
   header.append(dragHandle, title, minimizeButton);
 
   const host = document.createElement("div");
-  const isEmpty = query.status !== "completed";
+  const isEmpty = isDnfQuery(query);
   host.className = `compare-viewport${isEmpty ? " is-empty" : ""}`;
 
   const stage = document.createElement("div");
@@ -160,9 +160,14 @@ function createBlockShell(item) {
   return { element: block, host: stage };
 }
 
+function isDnfQuery(query) {
+  return query.status !== "completed";
+}
+
 async function createViewport(item, host) {
   const { query, run, color } = item;
   const queryId = query.query_id || query.id || "";
+  const isDnf = isDnfQuery(query);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(backgroundColor);
 
@@ -183,6 +188,7 @@ async function createViewport(item, host) {
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  controls.enabled = !isDnf;
 
   let mesh = null;
   let maxDim = 0.001;
@@ -207,7 +213,7 @@ async function createViewport(item, host) {
     scene.add(mesh);
   }
 
-  return { scene, camera, renderer, controls, mesh, maxDim, host, block: null };
+  return { scene, camera, renderer, controls, mesh, maxDim, host, block: null, isDnf };
 }
 
 function setupBlockInteractions(blocks, grid) {
@@ -398,6 +404,7 @@ function setupSyncedControls(viewports) {
   let syncing = false;
 
   viewports.forEach((viewport) => {
+    if (viewport.isDnf) return;
     viewport.controls.addEventListener("change", () => {
       if (syncing) return;
       syncing = true;

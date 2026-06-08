@@ -14,6 +14,132 @@
   width: fit-content;
 }
 
+.compare-block.is-dragging {
+  opacity: .55;
+  pointer-events: none;
+}
+
+.compare-block.is-drop-target {
+  box-shadow: 0 0 0 2px var(--run-color, var(--bs-primary));
+}
+
+.compare-block.is-minimized {
+  border-top-width: .25rem;
+  max-width: 100%;
+  width: 100%;
+}
+
+.compare-minimized-stack {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: .35rem;
+  max-width: min(14rem, 100%);
+  width: fit-content;
+}
+
+.compare-minimized-stack .compare-block {
+  width: 100%;
+}
+
+.compare-block-header {
+  align-items: center;
+  border-bottom: 1px solid var(--cb-border);
+  display: flex;
+  gap: .5rem;
+  padding: .45rem .55rem .45rem .35rem;
+}
+
+.compare-block.is-minimized .compare-block-header {
+  border-bottom: 0;
+  gap: .35rem;
+  padding: .28rem .4rem .28rem .2rem;
+}
+
+.compare-block-drag {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: .35rem;
+  color: var(--bs-secondary-color);
+  cursor: grab;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1.75rem;
+  justify-content: center;
+  padding: 0;
+  user-select: none;
+  width: 1.75rem;
+}
+
+.compare-block-drag:active {
+  cursor: grabbing;
+}
+
+.compare-block-drag:hover {
+  background: var(--cb-muted-surface);
+  color: var(--bs-body-color);
+}
+
+.compare-block-drag-icon {
+  background:
+    radial-gradient(circle, currentColor .09rem, transparent .1rem) 0 0 / .32rem .32rem;
+  display: block;
+  height: .64rem;
+  width: .64rem;
+}
+
+.compare-block-title {
+  flex: 1 1 auto;
+  font-size: .88rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compare-block.is-minimized .compare-block-title {
+  cursor: pointer;
+  font-size: .76rem;
+}
+
+.compare-block.is-minimized .compare-block-drag,
+.compare-block.is-minimized .compare-block-minimize {
+  height: 1.4rem;
+  width: 1.4rem;
+}
+
+.compare-block.is-minimized .compare-block-minimize {
+  font-size: .9rem;
+}
+
+.compare-block-minimize {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--cb-border);
+  border-radius: .35rem;
+  color: var(--bs-secondary-color);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  height: 1.75rem;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 1.75rem;
+}
+
+.compare-block-minimize:hover {
+  background: var(--cb-muted-surface);
+  color: var(--bs-body-color);
+}
+
+.compare-block.is-minimized .compare-viewport,
+.compare-block.is-minimized .compare-meta {
+  display: none;
+}
+
 .compare-viewport {
   aspect-ratio: 1 / 1;
   background: var(--cb-muted-surface);

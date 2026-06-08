@@ -145,6 +145,18 @@ def test_compare_renders_metrics_list():
     assert 'Object.entries(metrics).map(([key, value])' in script
 
 
+def test_compare_supports_block_reorder_and_minimize():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert "compare-block-header" in script
+    assert "compare-block-drag" in script
+    assert "compare-block-minimize" in script
+    assert "setupDragReorder" in script
+    assert "setupMinimize" in script
+    assert "is-minimized" in script
+    assert "compare-minimized-stack" in script
+
+
 def test_app_route_resets_modal_backdrop():
     script = (STATIC_DIR / "app.js").read_text()
 

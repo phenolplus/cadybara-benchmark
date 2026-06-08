@@ -63,14 +63,19 @@ async function initCompare() {
     const blocks = compareItems.map((item) => {
       const { element, host } = createBlockShell(item);
       compareGrid.append(element);
-      return { item, host };
+      return { element, item, host };
     });
-    const viewports = await Promise.all(blocks.map(({ item, host }, index) => createViewport(item, host, index)));
+    const viewports = await Promise.all(blocks.map(({ item, host }) => createViewport(item, host)));
+    blocks.forEach((block, index) => {
+      block.viewport = viewports[index];
+      block.viewport.block = block.element;
+    });
     setupViewportResize(viewports);
     setupSyncedControls(viewports);
+    setupBlockInteractions(blocks, compareGrid);
     fitAllCameras(viewports);
     animate(viewports);
-    showStatus("Drag any viewport to rotate all models together.");
+    showStatus("Drag a block handle to reorder. Drag any viewport to rotate all models together.");
   } catch (error) {
     showStatus(error.message, true);
   }
@@ -79,9 +84,37 @@ async function initCompare() {
 function createBlockShell(item) {
   const { query, run, color } = item;
   const queryId = query.query_id || query.id || "";
+  const blockId = `${run.id || ""}:${queryId}`;
+  const titleText = `${run.id || ""} · ${queryId}`;
+
   const block = document.createElement("article");
   block.className = "compare-block";
+  block.dataset.blockId = blockId;
   block.style.setProperty("--run-color", color.swatch);
+
+  const header = document.createElement("header");
+  header.className = "compare-block-header";
+
+  const dragHandle = document.createElement("button");
+  dragHandle.type = "button";
+  dragHandle.className = "compare-block-drag";
+  dragHandle.draggable = true;
+  dragHandle.setAttribute("aria-label", "Drag to reorder");
+  dragHandle.innerHTML = '<span class="compare-block-drag-icon" aria-hidden="true"></span>';
+
+  const title = document.createElement("div");
+  title.className = "compare-block-title";
+  title.textContent = titleText;
+
+  const minimizeButton = document.createElement("button");
+  minimizeButton.type = "button";
+  minimizeButton.className = "compare-block-minimize";
+  minimizeButton.setAttribute("aria-label", "Minimize block");
+  minimizeButton.setAttribute("aria-expanded", "true");
+  minimizeButton.innerHTML = '<span class="compare-block-minimize-icon" aria-hidden="true">−</span>';
+
+  header.append(dragHandle, title, minimizeButton);
+
   const host = document.createElement("div");
   const isEmpty = query.status !== "completed";
   host.className = `compare-viewport${isEmpty ? " is-empty" : ""}`;
@@ -98,6 +131,7 @@ function createBlockShell(item) {
   }
 
   block.append(
+    header,
     host,
     metaFromHtml(`
     <div class="compare-meta">
@@ -126,7 +160,7 @@ function createBlockShell(item) {
   return { element: block, host: stage };
 }
 
-async function createViewport(item, host, index) {
+async function createViewport(item, host) {
   const { query, run, color } = item;
   const queryId = query.query_id || query.id || "";
   const scene = new THREE.Scene();
@@ -173,7 +207,170 @@ async function createViewport(item, host, index) {
     scene.add(mesh);
   }
 
-  return { index, scene, camera, renderer, controls, mesh, maxDim, host };
+  return { scene, camera, renderer, controls, mesh, maxDim, host, block: null };
+}
+
+function setupBlockInteractions(blocks, grid) {
+  blocks.forEach(({ element }) => {
+    setupDragReorder(element, grid);
+    setupMinimize(element, grid);
+  });
+}
+
+function setupDragReorder(block, grid) {
+  const handle = block.querySelector(".compare-block-drag");
+  if (!handle) return;
+
+  let draggedBlock = null;
+
+  handle.addEventListener("dragstart", (event) => {
+    draggedBlock = block;
+    block.classList.add("is-dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", block.dataset.blockId || "");
+  });
+
+  handle.addEventListener("dragend", () => {
+    block.classList.remove("is-dragging");
+    grid.querySelectorAll(".compare-block.is-drop-target").forEach((node) => {
+      node.classList.remove("is-drop-target");
+    });
+    draggedBlock = null;
+  });
+
+  grid.addEventListener("dragover", (event) => {
+    if (!draggedBlock) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+
+    grid.querySelectorAll(".compare-block.is-drop-target").forEach((node) => {
+      node.classList.remove("is-drop-target");
+    });
+
+    const target = getDropTargetBlock(event.clientX, event.clientY, draggedBlock);
+    if (target) {
+      target.classList.add("is-drop-target");
+      insertBlockRelativeToTarget(draggedBlock, target, event.clientY);
+    }
+  });
+
+  grid.addEventListener("drop", (event) => {
+    event.preventDefault();
+    if (!draggedBlock) return;
+
+    const target = getDropTargetBlock(event.clientX, event.clientY, draggedBlock);
+    if (target) {
+      insertBlockRelativeToTarget(draggedBlock, target, event.clientY);
+    } else if (draggedBlock.classList.contains("is-minimized")) {
+      getOrCreateMinimizedStack(grid).appendChild(draggedBlock);
+    } else {
+      const stack = grid.querySelector(".compare-minimized-stack");
+      if (stack) {
+        stack.before(draggedBlock);
+      } else {
+        grid.appendChild(draggedBlock);
+      }
+    }
+
+    grid.querySelectorAll(".compare-block.is-drop-target").forEach((node) => {
+      node.classList.remove("is-drop-target");
+    });
+  });
+}
+
+function getDropTargetBlock(clientX, clientY, draggedBlock) {
+  const element = document.elementFromPoint(clientX, clientY);
+  const stack = element?.closest(".compare-minimized-stack");
+  const block = element?.closest(".compare-block");
+  const draggedMinimized = draggedBlock.classList.contains("is-minimized");
+
+  if (block && block !== draggedBlock && compareGrid.contains(block)) {
+    const targetMinimized = block.classList.contains("is-minimized");
+    if (draggedMinimized === targetMinimized) {
+      return block;
+    }
+  }
+
+  if (draggedMinimized && stack && compareGrid.contains(stack)) {
+    return stack.lastElementChild && stack.lastElementChild !== draggedBlock
+      ? stack.lastElementChild
+      : null;
+  }
+
+  return null;
+}
+
+function insertBlockRelativeToTarget(draggedBlock, targetBlock, clientY) {
+  const rect = targetBlock.getBoundingClientRect();
+  const midpoint = rect.top + rect.height / 2;
+  const pointerBelowMidpoint = clientY >= midpoint;
+
+  if (pointerBelowMidpoint) {
+    if (targetBlock.nextElementSibling !== draggedBlock) {
+      targetBlock.after(draggedBlock);
+    }
+  } else if (targetBlock.previousElementSibling !== draggedBlock) {
+    targetBlock.before(draggedBlock);
+  }
+}
+
+function setupMinimize(block, grid) {
+  const minimizeButton = block.querySelector(".compare-block-minimize");
+  const title = block.querySelector(".compare-block-title");
+  const icon = minimizeButton?.querySelector(".compare-block-minimize-icon");
+  if (!minimizeButton || !icon) return;
+
+  const setExpanded = (expanded) => {
+    block.classList.toggle("is-minimized", !expanded);
+    minimizeButton.setAttribute("aria-expanded", String(expanded));
+    minimizeButton.setAttribute("aria-label", expanded ? "Minimize block" : "Expand block");
+    icon.textContent = expanded ? "−" : "+";
+  };
+
+  minimizeButton.addEventListener("click", () => {
+    const willMinimize = !block.classList.contains("is-minimized");
+    if (willMinimize) {
+      setExpanded(false);
+      getOrCreateMinimizedStack(grid).appendChild(block);
+    } else {
+      setExpanded(true);
+      restoreExpandedBlock(block, grid);
+    }
+  });
+
+  title?.addEventListener("click", () => {
+    if (!block.classList.contains("is-minimized")) return;
+    setExpanded(true);
+    restoreExpandedBlock(block, grid);
+  });
+}
+
+function getOrCreateMinimizedStack(grid) {
+  let stack = grid.querySelector(".compare-minimized-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.className = "compare-minimized-stack";
+    stack.setAttribute("aria-label", "Minimized blocks");
+    grid.appendChild(stack);
+  }
+  return stack;
+}
+
+function restoreExpandedBlock(block, grid) {
+  const stack = grid.querySelector(".compare-minimized-stack");
+  if (stack) {
+    stack.before(block);
+    removeMinimizedStackIfEmpty(grid);
+  } else {
+    grid.appendChild(block);
+  }
+}
+
+function removeMinimizedStackIfEmpty(grid) {
+  const stack = grid.querySelector(".compare-minimized-stack");
+  if (stack && !stack.children.length) {
+    stack.remove();
+  }
 }
 
 function runColor(index) {
@@ -204,21 +401,24 @@ function setupSyncedControls(viewports) {
     viewport.controls.addEventListener("change", () => {
       if (syncing) return;
       syncing = true;
-      syncCameras(viewports, viewport.index);
+      syncCameras(viewports, viewport);
       syncing = false;
     });
   });
 }
 
-function syncCameras(viewports, sourceIndex) {
-  const source = viewports[sourceIndex];
+function syncCameras(viewports, source) {
   viewports.forEach((viewport) => {
-    if (viewport.index === sourceIndex) return;
+    if (viewport === source) return;
     viewport.camera.position.copy(source.camera.position);
     viewport.camera.quaternion.copy(source.camera.quaternion);
     viewport.controls.target.copy(source.controls.target);
     viewport.controls.update();
   });
+}
+
+function isViewportMinimized(viewport) {
+  return Boolean(viewport.block?.classList.contains("is-minimized"));
 }
 
 function fitAllCameras(viewports) {
@@ -246,6 +446,7 @@ function animate(viewports) {
   function frame() {
     requestAnimationFrame(frame);
     viewports.forEach((viewport) => {
+      if (isViewportMinimized(viewport)) return;
       viewport.controls.update();
       viewport.renderer.render(viewport.scene, viewport.camera);
     });

@@ -1,0 +1,76 @@
+.compare-grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+}
+
+.compare-block {
+  background: var(--bs-body-bg);
+  border: 1px solid var(--cb-border);
+  border-radius: .5rem;
+  max-width: 100%;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.compare-viewport {
+  aspect-ratio: 1 / 1;
+  background: var(--cb-muted-surface);
+  height: auto;
+  position: relative;
+  width: min(512px, 100%);
+}
+
+.compare-viewport-stage {
+  inset: 0;
+  position: absolute;
+}
+
+.compare-viewport-stage canvas {
+  display: block;
+  height: 100% !important;
+  width: 100% !important;
+}
+
+.compare-viewport.is-empty {
+  background: linear-gradient(145deg, var(--cb-muted-surface), var(--cb-border));
+}
+
+.compare-viewport-label {
+  align-items: center;
+  color: var(--bs-secondary-color);
+  display: flex;
+  font-size: 2rem;
+  font-weight: 700;
+  inset: 0;
+  justify-content: center;
+  letter-spacing: .12em;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+.compare-meta {
+  display: grid;
+  gap: .35rem;
+  padding: .85rem 1rem 1rem;
+}
+
+.compare-meta .label {
+  color: var(--bs-secondary-color);
+  font-size: .72rem;
+  letter-spacing: .04em;
+  margin-bottom: .1rem;
+  text-transform: uppercase;
+}
+
+.compare-meta .value {
+  font-size: .92rem;
+  white-space: normal;
+}
+
+.compare-meta .error {
+  color: var(--bs-danger);
+  font-size: .85rem;
+  margin-top: .25rem;
+}

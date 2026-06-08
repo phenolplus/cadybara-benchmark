@@ -65,6 +65,11 @@ def stl_viewer() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "stl-viewer.html").read_text())
 
 
+@app.get("/compare/{experiment_id}/{run_id}", response_class=HTMLResponse)
+def compare_viewer() -> HTMLResponse:
+    return HTMLResponse((STATIC_DIR / "compare.html").read_text())
+
+
 @app.get("/api/experiments")
 def api_list_experiments() -> list[dict[str, Any]]:
     return [_experiment_summary(experiment) for experiment in list_experiments()]
@@ -127,6 +132,14 @@ def api_run_experiment(experiment_id: str, payload: RunRequest) -> dict[str, Any
 def api_publish_experiment(experiment_id: str, run_id: str | None = None) -> dict[str, Any]:
     try:
         return publish_experiment(experiment_id, run_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.get("/api/experiments/{experiment_id}/runs/{run_id}")
+def api_get_run(experiment_id: str, run_id: str) -> dict[str, Any]:
+    try:
+        return _run_payload(experiment_id, run_id)
     except Exception as exc:
         raise _http_error(exc) from exc
 
@@ -210,6 +223,24 @@ def _stored_path(path: Path) -> str:
         return str(path.relative_to(REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
+    run = get_run(experiment_id, run_id)
+    queries = []
+    for query in run.get("queries", []):
+        stl_path = _resolve_query_stl_path(query)
+        queries.append(
+            {
+                **query,
+                "has_stl": bool(stl_path and stl_path.exists()),
+            }
+        )
+    return {
+        **run,
+        "experiment_id": experiment_id,
+        "queries": queries,
+    }
 
 
 def _run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:

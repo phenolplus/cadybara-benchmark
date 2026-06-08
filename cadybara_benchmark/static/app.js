@@ -215,7 +215,10 @@ function runRows(run, experimentId) {
       <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
       <td>${run.average_score !== null && run.average_score !== undefined ? run.average_score : ""}</td>
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
-      <td><button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button></td>
+      <td class="text-nowrap">
+        <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
+        <button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button>
+      </td>
     </tr>
     <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
       <td colspan="7">

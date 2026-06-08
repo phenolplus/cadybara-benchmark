@@ -9,7 +9,9 @@ from cadybara_benchmark.services.runs import run_experiment
 from cadybara_benchmark.web import (
     STATIC_DIR,
     _query_stl_path,
+    _run_payload,
     _run_query,
+    compare_viewer,
     stl_viewer,
 )
 
@@ -68,3 +70,21 @@ def test_stl_path_rejects_missing_run(settings, monkeypatch):
         assert "Run not found" in str(exc)
     else:
         raise AssertionError("Expected missing run to raise ValueError")
+
+
+def test_compare_page_and_run_payload(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Compare Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    page = compare_viewer()
+    assert "Compare run" in page.body.decode()
+    assert (STATIC_DIR / "compare.html").exists()
+
+    payload = _run_payload("EXP001", "RUN001")
+    assert payload["id"] == "RUN001"
+    assert len(payload["queries"]) == 1
+    assert payload["queries"][0]["has_stl"] is True
+    assert payload["queries"][0]["text"] == "Create a cube."

@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
-from cadybara_benchmark.db import dumps_json
+from cadybara_benchmark.json_utils import dumps_json
 from cadybara_benchmark.services.experiments import get_experiment
-from cadybara_benchmark.services.queries import get_query
-from cadybara_benchmark.services.runs import get_result_for_run, list_runs
+from cadybara_benchmark.services.runs import list_runs
 from cadybara_benchmark.time import utc_now
 
 
@@ -26,37 +25,47 @@ def publish_experiment(
 
     published = []
     for run in runs:
-        result = get_result_for_run(run["id"], settings)
-        if result is None:
+        completed_queries = [
+            query for query in run.get("queries", []) if query.get("status") == "completed"
+        ]
+        if not completed_queries:
             continue
-        query = get_query(run["query_id"], settings)
+
         run_dir = settings.published_dir / "runs" / run["id"]
         run_dir.mkdir(parents=True, exist_ok=True)
-        copied_stl_paths = []
-        for raw_path in result["stl_paths"]:
-            source = _resolve_path(raw_path)
-            destination = run_dir / source.name
-            shutil.copy2(source, destination)
-            copied_stl_paths.append(_stored_path(destination))
+        published_queries = []
+        for query in completed_queries:
+            artifact_dir = _resolve_path(query["artifact_dir"])
+            stl_path = artifact_dir / "model.stl"
+            if not stl_path.exists():
+                continue
+            query_publish_dir = run_dir / query["query_id"]
+            query_publish_dir.mkdir(parents=True, exist_ok=True)
+            destination = query_publish_dir / stl_path.name
+            shutil.copy2(stl_path, destination)
+            published_queries.append(
+                {
+                    "query_id": query["query_id"],
+                    "sublabel": query.get("sublabel", ""),
+                    "text": query.get("text", ""),
+                    "model": query.get("model", ""),
+                    "stl_paths": [_stored_path(destination)],
+                    "score": query.get("score"),
+                    "metrics": query.get("metrics", {}),
+                    "source_artifact_paths": [_stored_path(stl_path)],
+                }
+            )
+
+        if not published_queries:
+            continue
 
         payload = {
             "experiment_id": experiment["id"],
             "experiment": experiment["name"],
             "run_id": run["id"],
             "published_at": utc_now(),
-            "query": {
-                "id": query["id"],
-                "text": query["text"],
-                "category": query["category"],
-                "metadata": query["metadata"],
-            },
-            "model": run["model"],
-            "parameters": run["parameters"],
-            "response_metadata": result["response_metadata"],
-            "stl_paths": copied_stl_paths,
-            "score": result["score"],
-            "metrics": result["metrics"],
-            "source_artifact_paths": result["stl_paths"],
+            "parameters": run.get("parameters", {}),
+            "queries": published_queries,
         }
         json_path = settings.published_dir / "runs" / f"{run['id']}.json"
         json_path.parent.mkdir(parents=True, exist_ok=True)

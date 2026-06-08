@@ -26,7 +26,6 @@ def _path_from_env(name: str, default: str) -> Path:
 class Settings:
     api_base_url: str
     api_key: str | None
-    db_path: Path
     workspace_dir: Path
     published_dir: Path
     default_response_mode: str
@@ -47,7 +46,6 @@ def get_settings() -> Settings:
     return Settings(
         api_base_url=os.getenv("CADYBARA_API_BASE_URL", "https://api.cadybara.com").rstrip("/"),
         api_key=os.getenv("CADYBARA_API_KEY"),
-        db_path=_path_from_env("CADYBARA_DB_PATH", "workspace/research.db"),
         workspace_dir=_path_from_env("CADYBARA_WORKSPACE_DIR", "workspace"),
         published_dir=_path_from_env("CADYBARA_PUBLISHED_DIR", "published"),
         default_response_mode=os.getenv("CADYBARA_DEFAULT_RESPONSE_MODE", "json"),

@@ -1,6 +1,6 @@
 # cadybara-benchmark
 
-Bootstrap CLI for running local benchmark experiments against the Cadybara Agent API.
+Local benchmark CLI for running Cadybara Agent API experiments, collecting STL outputs, analyzing runs, and publishing selected results.
 
 ## Setup
 
@@ -12,23 +12,151 @@ python -m pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Edit `.env` and set `CADYBARA_API_KEY`.
+Edit `.env` and set `CADYBARA_API_KEY`. To use a local Cadybara API server, also set `CADYBARA_API_BASE_URL`, for example:
 
-## First Run
+```text
+CADYBARA_API_BASE_URL=http://localhost:8008
+```
+
+The API request timeout is controlled by:
+
+```text
+CADYBARA_REQUEST_TIMEOUT_SECONDS=180
+```
+
+## Storage Model
+
+Experiment definitions are YAML files:
+
+```text
+workspace/experiments/EXP001.yaml
+```
+
+Each experiment run executes all query lines and is stored on disk:
+
+```text
+workspace/artifacts/{experiment_id}/{run_id}/summary.json
+workspace/artifacts/{experiment_id}/{run_id}/{query_id}/model.stl
+workspace/artifacts/{experiment_id}/{run_id}/{query_id}/response.json
+```
+
+Published run files are written under:
+
+```text
+published/runs/
+```
+
+## Experiment YAML Format
+
+Each query line may specify a model and a `sublabel`. If `model` is empty, the query uses `setup.model`.
+
+```yaml
+id: "EXP001"
+name: "Three-Tier Cubic Snowman Model Comparison"
+description: "Compare three models on a three-tier cubic snowman query."
+type: "query_comparison"
+status: "draft"
+setup:
+  model: "default"
+  response_mode: "json"
+  linear_deflection: 0.1
+  angular_deflection: 0.1
+created_at: "2026-06-07T19:40:47Z"
+updated_at: "2026-06-07T19:40:47Z"
+queries:
+  - id: "Q001"
+    sublabel: "snowman-gemini-flash"
+    text: "design a three-tier cubic snowman with slightly soft edges"
+    model: "google/gemini-3-flash-preview"
+    category: ""
+    metadata: {}
+```
+
+Runs are associated with the experiment. Each run executes all query lines in that experiment and stores per-query snapshots (sublabel, text, model) in `summary.json` plus detail artifacts in query subfolders.
+
+## Common Workflow
+
+Create an experiment:
 
 ```bash
-cadybara-benchmark init-db
-cadybara-benchmark create-experiment --name "Bracket Query Comparison"
-cadybara-benchmark add-query EXP001 --text "Create a 20mm cube with a 5mm through-hole."
+cadybara-benchmark create-experiment \
+  --name "Three-Tier Cubic Snowman Model Comparison" \
+  --description "Compare three models on a three-tier cubic snowman query."
+```
+
+Add query lines, one per model:
+
+```bash
+cadybara-benchmark add-query EXP001 \
+  --text "design a three-tier cubic snowman with slightly soft edges" \
+  --model "google/gemini-3-flash-preview" \
+  --sublabel "snowman-gemini-flash"
+
+cadybara-benchmark add-query EXP001 \
+  --text "design a three-tier cubic snowman with slightly soft edges" \
+  --model "gpt-5.4-mini" \
+  --sublabel "snowman-gpt-5-4-mini"
+
+cadybara-benchmark add-query EXP001 \
+  --text "design a three-tier cubic snowman with slightly soft edges" \
+  --model "gpt-5.5" \
+  --sublabel "snowman-gpt-5-5"
+```
+
+Inspect the experiment:
+
+```bash
+cadybara-benchmark show-experiment EXP001
+cadybara-benchmark list-queries EXP001
+```
+
+Run the experiment:
+
+```bash
 cadybara-benchmark run EXP001
+```
+
+Analyze completed results:
+
+```bash
 cadybara-benchmark analyze EXP001
+```
+
+Publish completed runs:
+
+```bash
 cadybara-benchmark publish EXP001
 ```
 
-To submit a one-off query without creating an experiment:
+Publish one completed run:
 
 ```bash
-cadybara-benchmark submit-query --text "Create a 20mm cube with a 5mm through-hole."
+cadybara-benchmark publish EXP001 --run-id RUN001
+```
+
+## Webapp
+
+Start the local experiment management webapp:
+
+```bash
+cadybara-benchmark web
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8000/experiments
+```
+
+The webapp provides the MVP pages from `DESIGN.md`: experiment listing and creation, experiment detail with setup/query/run organization, light/dark theme switching, and the published runs page.
+
+## One-Off Query
+
+Submit a query without creating an experiment:
+
+```bash
+cadybara-benchmark submit-query \
+  --text "Create a 20mm cube with a 5mm through-hole."
 ```
 
 Select a model for a one-off query:
@@ -36,7 +164,16 @@ Select a model for a one-off query:
 ```bash
 cadybara-benchmark submit-query \
   --text "A three tier cubic snowman with soft edges" \
-  --model google/gemini-3-flash-preview
+  --model "google/gemini-3-flash-preview"
 ```
 
-Generated workspace state is stored under `workspace/` and ignored by git. Published runs are written under `published/runs/`.
+## Useful Commands
+
+```bash
+cadybara-benchmark list-experiments
+cadybara-benchmark show-experiment EXP001
+cadybara-benchmark list-queries EXP001
+cadybara-benchmark run EXP001
+cadybara-benchmark analyze EXP001
+cadybara-benchmark publish EXP001
+```

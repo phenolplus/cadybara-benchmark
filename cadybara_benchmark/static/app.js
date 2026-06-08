@@ -1,0 +1,438 @@
+const app = document.querySelector("#app");
+const alerts = document.querySelector("#alerts");
+const themeSwitch = document.querySelector("#themeSwitch");
+
+const state = {
+  experiments: [],
+  current: null,
+  published: [],
+};
+
+const savedTheme = localStorage.getItem("theme") || "light";
+document.documentElement.dataset.bsTheme = savedTheme;
+themeSwitch.checked = savedTheme === "dark";
+
+themeSwitch.addEventListener("change", () => {
+  const theme = themeSwitch.checked ? "dark" : "light";
+  document.documentElement.dataset.bsTheme = theme;
+  localStorage.setItem("theme", theme);
+});
+
+document.addEventListener("click", (event) => {
+  const modalTrigger = event.target.closest("[data-bs-toggle='modal']");
+  if (modalTrigger) {
+    const target = document.querySelector(modalTrigger.dataset.bsTarget);
+    if (target && !window.bootstrap) {
+      event.preventDefault();
+      showModal(target);
+      return;
+    }
+  }
+
+  const dismiss = event.target.closest("[data-bs-dismiss='modal']");
+  if (dismiss && !window.bootstrap) {
+    event.preventDefault();
+    hideModal(dismiss.closest(".modal"));
+    return;
+  }
+
+  const link = event.target.closest("[data-link]");
+  if (!link) return;
+  event.preventDefault();
+  navigate(link.getAttribute("href"));
+});
+
+window.addEventListener("popstate", route);
+
+function navigate(path) {
+  history.pushState({}, "", path);
+  route();
+}
+
+async function route() {
+  const path = window.location.pathname;
+  if (path === "/" || path === "/experiments") {
+    await renderExperiments();
+    return;
+  }
+  if (path.startsWith("/experiment/")) {
+    await renderExperiment(path.split("/").pop());
+    return;
+  }
+  if (path === "/published") {
+    await renderPublished();
+    return;
+  }
+  navigate("/experiments");
+}
+
+async function renderExperiments() {
+  state.experiments = await api("/api/experiments");
+  app.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="h3 mb-1">Experiments</h1>
+        <p class="text-body-secondary mb-0">Organize query datasets, runs, results, and publication status.</p>
+      </div>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#experimentModal">New experiment</button>
+    </div>
+    <section class="panel overflow-hidden">
+      ${state.experiments.length ? experimentsTable(state.experiments) : `<div class="empty-state">No experiments yet.</div>`}
+    </section>
+    ${experimentModal()}
+  `;
+  bindExperimentForm();
+}
+
+async function renderExperiment(id) {
+  state.current = await api(`/api/experiments/${id}`);
+  const experiment = state.current;
+  app.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="text-body-secondary small mb-1">${escapeHtml(experiment.id)} · ${escapeHtml(experiment.type || "")}</div>
+        <h1 class="h3 mb-1">${escapeHtml(experiment.name)}</h1>
+        <p class="text-body-secondary mb-0">${escapeHtml(experiment.description || "No description")}</p>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#queryModal">Add query</button>
+        <button class="btn btn-outline-primary" id="publishExperiment">Publish completed</button>
+        <button class="btn btn-primary" id="runExperiment">Run experiment</button>
+      </div>
+    </div>
+    <div class="metric-grid mb-3">
+      ${metric("Status", experiment.status || "draft")}
+      ${metric("Queries", experiment.queries.length)}
+      ${metric("Runs", experiment.runs.length)}
+      ${metric("Results", experiment.results.length)}
+    </div>
+    <div class="row g-3">
+      <div class="col-xl-7">
+        <section class="panel overflow-hidden">
+          <div class="p-3 border-bottom"><h2 class="h5 mb-0">Queries</h2></div>
+          ${experiment.queries.length ? queriesTable(experiment.queries) : `<div class="empty-state m-3">No queries configured.</div>`}
+        </section>
+      </div>
+      <div class="col-xl-5">
+        <section class="panel">
+          <div class="p-3 border-bottom"><h2 class="h5 mb-0">Setup</h2></div>
+          <div class="p-3"><pre class="code-box mb-0">${escapeHtml(JSON.stringify(experiment.setup || {}, null, 2))}</pre></div>
+        </section>
+      </div>
+      <div class="col-12">
+        <section class="panel overflow-hidden">
+          <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
+          ${experiment.runs.length ? runsTable(experiment.runs) : `<div class="empty-state m-3">No runs recorded.</div>`}
+        </section>
+      </div>
+    </div>
+    ${queryModal(experiment.id)}
+  `;
+  bindExperimentActions(experiment.id);
+  bindQueryForm(experiment.id);
+}
+
+async function renderPublished() {
+  state.published = await api("/api/published");
+  app.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="h3 mb-1">Published Runs</h1>
+        <p class="text-body-secondary mb-0">Stable JSON exports under published/runs.</p>
+      </div>
+    </div>
+    <section class="panel overflow-hidden">
+      ${state.published.length ? publishedTable(state.published) : `<div class="empty-state">No published runs yet.</div>`}
+    </section>
+  `;
+}
+
+function experimentsTable(experiments) {
+  return `
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Queries</th><th>Runs</th><th>Updated</th></tr></thead>
+        <tbody>
+          ${experiments.map((experiment) => `
+            <tr role="button" onclick="navigate('/experiment/${escapeAttr(experiment.id)}')">
+              <td class="fw-semibold">${escapeHtml(experiment.id)}</td>
+              <td>${escapeHtml(experiment.name)}</td>
+              <td>${statusBadge(experiment.status)}</td>
+              <td>${experiment.query_count}</td>
+              <td>${experiment.run_count}</td>
+              <td class="text-body-secondary small">${escapeHtml(experiment.updated_at || "")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function queriesTable(queries) {
+  return `
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th>ID</th><th>Sublabel</th><th>Model</th><th>Category</th><th>Text</th></tr></thead>
+        <tbody>
+          ${queries.map((query) => `
+            <tr>
+              <td class="fw-semibold">${escapeHtml(query.id)}</td>
+              <td>${escapeHtml(query.sublabel || "")}</td>
+              <td class="small">${escapeHtml(query.model || "(default)")}</td>
+              <td>${escapeHtml(query.category || "")}</td>
+              <td class="query-text">${escapeHtml(query.text || "")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function runsTable(runs) {
+  return `
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th>ID</th><th>Status</th><th>Queries</th><th>Avg score</th><th>Started</th><th></th></tr></thead>
+        <tbody>
+          ${runs.map((run) => `
+            <tr>
+              <td class="fw-semibold">${escapeHtml(run.id)}</td>
+              <td>${statusBadge(run.status)}</td>
+              <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
+              <td>${run.average_score !== null && run.average_score !== undefined ? run.average_score : ""}</td>
+              <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
+              <td><button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(run.id)}')">Publish</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function publishedTable(items) {
+  return `
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th>Run</th><th>Experiment</th><th>Queries</th><th>Published</th><th>File</th></tr></thead>
+        <tbody>
+          ${items.map((item) => `
+            <tr>
+              <td class="fw-semibold">${escapeHtml(item.run_id || "")}</td>
+              <td>${escapeHtml(item.experiment || item.experiment_id || "")}</td>
+              <td>${Array.isArray(item.queries) ? item.queries.length : 0}</td>
+              <td class="text-body-secondary small">${escapeHtml(item.published_at || "")}</td>
+              <td class="small">${escapeHtml(item.file_path || "")}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function experimentModal() {
+  return `
+    <div class="modal fade" id="experimentModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <form class="modal-content" id="experimentForm">
+          <div class="modal-header">
+            <h2 class="modal-title h5">New experiment</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label">Name</label>
+            <input class="form-control mb-3" name="name" required>
+            <label class="form-label">Description</label>
+            <textarea class="form-control mb-3" name="description" rows="3"></textarea>
+            <label class="form-label">Type</label>
+            <input class="form-control" name="type" value="query_comparison">
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary">Create</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function queryModal(experimentId) {
+  return `
+    <div class="modal fade" id="queryModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <form class="modal-content" id="queryForm">
+          <div class="modal-header">
+            <h2 class="modal-title h5">Add query to ${escapeHtml(experimentId)}</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="row g-3">
+              <div class="col-md-6">
+                <label class="form-label">Sublabel</label>
+                <input class="form-control" name="sublabel">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Category</label>
+                <input class="form-control" name="category">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Model</label>
+                <input class="form-control" name="model" placeholder="Leave blank for experiment default">
+              </div>
+              <div class="col-12">
+                <label class="form-label">Query text</label>
+                <textarea class="form-control" name="text" rows="5" required></textarea>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button class="btn btn-primary">Add query</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function bindExperimentForm() {
+  document.querySelector("#experimentForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    const experiment = await api("/api/experiments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    showAlert(`Created ${experiment.id}.`, "success");
+    navigate(`/experiment/${experiment.id}`);
+  });
+}
+
+function bindQueryForm(experimentId) {
+  document.querySelector("#queryForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    await api(`/api/experiments/${experimentId}/queries`, {
+      method: "POST",
+      body: JSON.stringify(blankToNull(data)),
+    });
+    showAlert("Query added.", "success");
+    await renderExperiment(experimentId);
+  });
+}
+
+function bindExperimentActions(experimentId) {
+  document.querySelector("#runExperiment").addEventListener("click", async () => {
+    if (!confirm("Run this experiment against the Cadybara API now?")) return;
+    const result = await api(`/api/experiments/${experimentId}/run`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
+    await renderExperiment(experimentId);
+  });
+  document.querySelector("#publishExperiment").addEventListener("click", async () => {
+    const result = await api(`/api/experiments/${experimentId}/publish`, { method: "POST" });
+    showAlert(`Published ${result.count} run(s).`, "success");
+    await renderExperiment(experimentId);
+  });
+}
+
+async function publishRun(runId) {
+  const experimentId = state.current.id;
+  const result = await api(`/api/experiments/${experimentId}/publish?run_id=${encodeURIComponent(runId)}`, {
+    method: "POST",
+  });
+  showAlert(`Published ${result.count} run(s).`, "success");
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const message = payload.detail || response.statusText;
+    showAlert(message, "danger");
+    throw new Error(message);
+  }
+  return response.json();
+}
+
+function metric(label, value) {
+  return `<div class="metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(String(value))}</div></div>`;
+}
+
+function statusBadge(status) {
+  const colors = {
+    draft: "secondary",
+    running: "primary",
+    completed: "success",
+    completed_with_errors: "warning",
+    failed: "danger",
+  };
+  return `<span class="badge text-bg-${colors[status] || "secondary"}">${escapeHtml(status || "")}</span>`;
+}
+
+function blankToNull(data) {
+  return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === "" ? null : value]));
+}
+
+function showAlert(message, type = "info") {
+  const alert = document.createElement("div");
+  alert.className = `alert alert-${type} alert-dismissible shadow-sm`;
+  alert.innerHTML = `
+    ${escapeHtml(message)}
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  `;
+  alerts.append(alert);
+  setTimeout(() => {
+    if (window.bootstrap) {
+      bootstrap.Alert.getOrCreateInstance(alert).close();
+    } else {
+      alert.remove();
+    }
+  }, 5000);
+}
+
+function showModal(modal) {
+  modal.classList.add("show");
+  modal.style.display = "block";
+  modal.removeAttribute("aria-hidden");
+  modal.setAttribute("aria-modal", "true");
+  document.body.classList.add("modal-open");
+  const backdrop = document.createElement("div");
+  backdrop.className = "modal-backdrop fade show";
+  backdrop.dataset.localBackdrop = "true";
+  document.body.append(backdrop);
+}
+
+function hideModal(modal) {
+  if (!modal) return;
+  modal.classList.remove("show");
+  modal.style.display = "none";
+  modal.setAttribute("aria-hidden", "true");
+  modal.removeAttribute("aria-modal");
+  document.body.classList.remove("modal-open");
+  document.querySelectorAll("[data-local-backdrop='true']").forEach((backdrop) => backdrop.remove());
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
+}
+
+route().catch((error) => showAlert(error.message, "danger"));

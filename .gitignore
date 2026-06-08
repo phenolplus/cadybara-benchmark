@@ -20,8 +20,6 @@ agent-api.md
 
 # Local benchmark workspace
 workspace/experiments/
-workspace/research.db
-workspace/*.db
 workspace/responses/
 workspace/generated/
 workspace/reports/

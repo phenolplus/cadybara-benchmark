@@ -5,7 +5,6 @@ from typing import Annotated
 import typer
 
 from cadybara_benchmark.config import get_settings
-from cadybara_benchmark.db import init_db
 from cadybara_benchmark.publishing import publish_experiment
 from cadybara_benchmark.services.analysis import analyze_experiment
 from cadybara_benchmark.services.direct import submit_query
@@ -30,13 +29,6 @@ app = typer.Typer(no_args_is_help=True)
 
 def _handle_error(exc: Exception) -> None:
     raise typer.Exit(code=1) from exc
-
-
-@app.command("init-db")
-def init_db_command() -> None:
-    settings = get_settings()
-    path = init_db(settings)
-    typer.echo(f"Initialized database: {path}")
 
 
 @app.command("create-experiment")
@@ -91,9 +83,11 @@ def add_query(
     experiment_id: str,
     text: Annotated[str | None, typer.Option(prompt=True)] = None,
     category: Annotated[str, typer.Option()] = "",
+    model: Annotated[str | None, typer.Option()] = None,
+    sublabel: Annotated[str | None, typer.Option()] = None,
 ) -> None:
     try:
-        query = add_query_service(experiment_id, text or "", category)
+        query = add_query_service(experiment_id, text or "", category, model, sublabel)
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         _handle_error(exc)
@@ -110,18 +104,22 @@ def list_queries(experiment_id: str) -> None:
     if not queries:
         typer.echo("No queries found.")
         return
-    typer.echo("ID    CATEGORY          TEXT")
+    typer.echo("ID    SUBLABEL             MODEL                           CATEGORY          TEXT")
     for query in queries:
         text = query["text"]
         if len(text) > 80:
             text = f"{text[:77]}..."
-        typer.echo(f"{query['id']:<5} {query['category']:<17} {text}")
+        model = query["model"] or "(default)"
+        typer.echo(
+            f"{query['id']:<5} {query['sublabel']:<20} {model:<31} "
+            f"{query['category']:<17} {text}"
+        )
 
 
 @app.command("run")
 def run(
     experiment_id: str,
-    model: Annotated[str, typer.Option()] = "default",
+    model: Annotated[str | None, typer.Option()] = None,
     linear_deflection: Annotated[float | None, typer.Option()] = None,
     angular_deflection: Annotated[float | None, typer.Option()] = None,
     response_mode: Annotated[str, typer.Option()] = "json",
@@ -137,11 +135,13 @@ def run(
 
         def progress(event: str, payload: dict) -> None:
             if event == "started":
-                typer.echo(f"Started {payload['run_id']} for {payload['query_id']}")
+                typer.echo(
+                    f"Started {payload['query_sublabel']} in {payload['run_id']}"
+                )
             elif event == "completed":
-                typer.echo(f"Completed {payload['run_id']}")
+                typer.echo(f"Completed {payload['query_sublabel']} in {payload['run_id']}")
             elif event == "failed":
-                typer.echo(f"Failed {payload['run_id']}")
+                typer.echo(f"Failed {payload['query_sublabel']} in {payload['run_id']}")
 
         summary = run_experiment(
             experiment_id, model, parameters, settings=settings, on_event=progress
@@ -151,7 +151,7 @@ def run(
         _handle_error(exc)
     typer.echo(
         f"Ran {experiment_id}: {summary['completed']} completed, {summary['failed']} failed "
-        f"({', '.join(summary['run_ids'])})"
+        f"(run {summary['run_id']})"
     )
 
 
@@ -206,3 +206,14 @@ def publish(
     typer.echo(f"Published {result['count']} run(s).")
     for path in result["published"]:
         typer.echo(path)
+
+
+@app.command("web")
+def web(
+    host: Annotated[str, typer.Option()] = "127.0.0.1",
+    port: Annotated[int, typer.Option()] = 8000,
+    reload: Annotated[bool, typer.Option()] = False,
+) -> None:
+    import uvicorn
+
+    uvicorn.run("cadybara_benchmark.web:app", host=host, port=port, reload=reload)

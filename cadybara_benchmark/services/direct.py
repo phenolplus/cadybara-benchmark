@@ -5,7 +5,7 @@ from typing import Any
 
 from cadybara_benchmark.api_client import CadybaraApiClient
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
-from cadybara_benchmark.db import dumps_json
+from cadybara_benchmark.json_utils import dumps_json
 from cadybara_benchmark.time import utc_now
 
 

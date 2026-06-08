@@ -9,7 +9,6 @@ def test_require_api_key_rejects_missing(tmp_path):
     settings = Settings(
         api_base_url="https://api.cadybara.com",
         api_key=None,
-        db_path=tmp_path / "research.db",
         workspace_dir=tmp_path / "workspace",
         published_dir=tmp_path / "published",
         default_response_mode="json",

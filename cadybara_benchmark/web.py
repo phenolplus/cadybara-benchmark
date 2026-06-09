@@ -27,6 +27,7 @@ from cadybara_benchmark.services.runs import (
     list_results_for_experiment,
     list_runs,
     run_experiment,
+    stop_run,
 )
 
 
@@ -188,6 +189,14 @@ def _sse_message(event: str, payload: dict[str, Any]) -> str:
 def api_publish_experiment(experiment_id: str, run_id: str | None = None) -> dict[str, Any]:
     try:
         return publish_experiment(experiment_id, run_id)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+
+@app.post("/api/experiments/{experiment_id}/runs/{run_id}/stop")
+def api_stop_run(experiment_id: str, run_id: str) -> dict[str, Any]:
+    try:
+        return stop_run(experiment_id, run_id)
     except Exception as exc:
         raise _http_error(exc) from exc
 

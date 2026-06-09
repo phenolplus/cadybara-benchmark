@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,18 @@ from cadybara_benchmark.services.experiments import get_experiment, update_exper
 from cadybara_benchmark.time import utc_now
 
 
+@dataclass
+class _ActiveRun:
+    experiment_id: str
+    cancel_event: threading.Event
+    lock: threading.Lock
+    run_summary: dict[str, Any]
+
+
+_active_runs: dict[str, _ActiveRun] = {}
+_active_runs_lock = threading.Lock()
+
+
 def list_runs(experiment_id: str, settings: Settings | None = None) -> list[dict[str, Any]]:
     return list_run_summaries(experiment_id, settings)
 
@@ -36,6 +49,36 @@ def list_results_for_experiment(
                 continue
             results.append(_query_result(run, query))
     return results
+
+
+def stop_run(
+    experiment_id: str,
+    run_id: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    active = _get_active_run(run_id)
+    if active is not None:
+        if active.experiment_id != experiment_id:
+            raise ValueError(f"Run not found: {run_id}")
+        active.cancel_event.set()
+        with active.lock:
+            if active.run_summary["status"] != "running":
+                raise ValueError(f"Run {run_id} is not running.")
+            _mark_run_stopped(active.run_summary)
+            save_run_summary(active.run_summary, settings)
+        update_experiment_status(experiment_id, "stopped", settings)
+        return dict(active.run_summary)
+
+    run_summary = get_run_by_id(run_id, settings)
+    if run_summary.get("experiment_id") != experiment_id:
+        raise ValueError(f"Run not found: {run_id}")
+    if run_summary["status"] != "running":
+        raise ValueError(f"Run {run_id} is not running.")
+    _mark_run_stopped(run_summary)
+    save_run_summary(run_summary, settings)
+    update_experiment_status(experiment_id, "stopped", settings)
+    return run_summary
 
 
 def get_result_for_run(run_id: str, settings: Settings | None = None) -> dict[str, Any] | None:
@@ -112,6 +155,16 @@ def run_experiment(
     }
     save_run_summary(run_summary, settings)
 
+    cancel_event = threading.Event()
+    summary_lock = threading.Lock()
+    active_run = _ActiveRun(
+        experiment_id=experiment_id,
+        cancel_event=cancel_event,
+        lock=summary_lock,
+        run_summary=run_summary,
+    )
+    _register_active_run(run_id, active_run)
+
     if on_event:
         on_event(
             "run_started",
@@ -120,15 +173,19 @@ def run_experiment(
 
     completed = 0
     failed = 0
-    summary_lock = threading.Lock()
 
     def execute_query(index: int) -> None:
         nonlocal completed, failed
         query = queries[index]
         query_entry = query_entries[index]
 
-        query_entry["status"] = "running"
         with summary_lock:
+            if cancel_event.is_set():
+                if query_entry["status"] in {"pending", "running"}:
+                    query_entry["status"] = "cancelled"
+                    save_run_summary(run_summary, settings)
+                return
+            query_entry["status"] = "running"
             save_run_summary(run_summary, settings)
         if on_event:
             on_event(
@@ -154,53 +211,62 @@ def run_experiment(
             if api_images:
                 full_parameters = {**full_parameters, "images": api_images}
             result = client.generate(query["text"], full_parameters)
-            write_generate_artifacts(
-                artifact_dir,
-                result,
-                linear_deflection=base_parameters["linear_deflection"],
-                angular_deflection=base_parameters["angular_deflection"],
-                output_format=output_format,
-            )
-            query_entry["status"] = "completed"
-            query_entry["response_metadata"] = result.response_metadata
-            query_entry["metrics"] = result.raw_response.get("metrics", {})
-            query_completed = 1
-            if on_event:
-                on_event(
-                    "completed",
-                    {"run_id": run_id, "query_id": query["id"]},
+            if cancel_event.is_set():
+                query_entry["status"] = "cancelled"
+            else:
+                write_generate_artifacts(
+                    artifact_dir,
+                    result,
+                    linear_deflection=base_parameters["linear_deflection"],
+                    angular_deflection=base_parameters["angular_deflection"],
+                    output_format=output_format,
                 )
+                query_entry["status"] = "completed"
+                query_entry["response_metadata"] = result.response_metadata
+                query_entry["metrics"] = result.raw_response.get("metrics", {})
+                query_completed = 1
+                if on_event:
+                    on_event(
+                        "completed",
+                        {"run_id": run_id, "query_id": query["id"]},
+                    )
         except CadybaraApiError as exc:
-            error_path = artifact_dir / "error.json"
-            error_path.write_text(dumps_json(exc.payload))
-            query_entry["status"] = "failed"
-            query_entry["error"] = exc.payload
-            query_failed = 1
-            if on_event:
-                on_event(
-                    "failed",
-                    {
-                        "run_id": run_id,
-                        "query_id": query["id"],
-                        "error": exc.payload,
-                    },
-                )
+            if cancel_event.is_set():
+                query_entry["status"] = "cancelled"
+            else:
+                error_path = artifact_dir / "error.json"
+                error_path.write_text(dumps_json(exc.payload))
+                query_entry["status"] = "failed"
+                query_entry["error"] = exc.payload
+                query_failed = 1
+                if on_event:
+                    on_event(
+                        "failed",
+                        {
+                            "run_id": run_id,
+                            "query_id": query["id"],
+                            "error": exc.payload,
+                        },
+                    )
         except Exception as exc:
-            error = {"message": str(exc), "type": exc.__class__.__name__}
-            error_path = artifact_dir / "error.json"
-            error_path.write_text(dumps_json(error))
-            query_entry["status"] = "failed"
-            query_entry["error"] = error
-            query_failed = 1
-            if on_event:
-                on_event(
-                    "failed",
-                    {
-                        "run_id": run_id,
-                        "query_id": query["id"],
-                        "error": error,
-                    },
-                )
+            if cancel_event.is_set():
+                query_entry["status"] = "cancelled"
+            else:
+                error = {"message": str(exc), "type": exc.__class__.__name__}
+                error_path = artifact_dir / "error.json"
+                error_path.write_text(dumps_json(error))
+                query_entry["status"] = "failed"
+                query_entry["error"] = error
+                query_failed = 1
+                if on_event:
+                    on_event(
+                        "failed",
+                        {
+                            "run_id": run_id,
+                            "query_id": query["id"],
+                            "error": error,
+                        },
+                    )
 
         with summary_lock:
             completed += query_completed
@@ -208,26 +274,61 @@ def run_experiment(
             run_summary["summary"] = {"completed": completed, "failed": failed}
             save_run_summary(run_summary, settings)
 
-    worker_count = min(concurrency, len(queries))
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [executor.submit(execute_query, index) for index in range(len(queries))]
-        for future in futures:
-            future.result()
+    try:
+        worker_count = min(concurrency, len(queries))
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            futures = [executor.submit(execute_query, index) for index in range(len(queries))]
+            for future in futures:
+                future.result()
 
-    run_summary["status"] = "completed" if failed == 0 else "completed_with_errors"
-    run_summary["finished_at"] = utc_now()
-    save_run_summary(run_summary, settings)
+        if cancel_event.is_set():
+            with summary_lock:
+                _mark_run_stopped(run_summary)
+                save_run_summary(run_summary, settings)
+            update_experiment_status(experiment_id, "stopped", settings)
+            stopped = True
+        else:
+            run_summary["status"] = "completed" if failed == 0 else "completed_with_errors"
+            run_summary["finished_at"] = utc_now()
+            save_run_summary(run_summary, settings)
+            update_experiment_status(
+                experiment_id, "completed" if failed == 0 else "completed_with_errors", settings
+            )
+            stopped = False
+    finally:
+        _unregister_active_run(run_id)
 
-    update_experiment_status(
-        experiment_id, "completed" if failed == 0 else "completed_with_errors", settings
-    )
     return {
         "experiment_id": experiment_id,
         "run_id": run_id,
         "run_ids": [run_id],
         "completed": completed,
         "failed": failed,
+        "stopped": stopped,
     }
+
+
+def _register_active_run(run_id: str, active_run: _ActiveRun) -> None:
+    with _active_runs_lock:
+        _active_runs[run_id] = active_run
+
+
+def _unregister_active_run(run_id: str) -> None:
+    with _active_runs_lock:
+        _active_runs.pop(run_id, None)
+
+
+def _get_active_run(run_id: str) -> _ActiveRun | None:
+    with _active_runs_lock:
+        return _active_runs.get(run_id)
+
+
+def _mark_run_stopped(run_summary: dict[str, Any]) -> None:
+    for query_entry in run_summary.get("queries", []):
+        if query_entry.get("status") in {"pending", "running"}:
+            query_entry["status"] = "cancelled"
+    run_summary["status"] = "stopped"
+    run_summary["finished_at"] = utc_now()
 
 
 def _initial_query_entry(

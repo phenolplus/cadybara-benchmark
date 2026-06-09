@@ -251,6 +251,7 @@ function runRows(run, experimentId) {
       <td class="text-body-secondary small">${formatClientLatency(run.average_client_latency_ms)}</td>
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
       <td class="text-nowrap">
+        ${run.status === "running" ? `<button class="btn btn-sm btn-outline-danger" onclick="stopRun('${escapeAttr(runId)}')">Stop</button>` : ""}
         <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
         <button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button>
       </td>
@@ -502,8 +503,7 @@ function bindExperimentActions(experimentId) {
     showAlert("Run started.", "info");
 
     try {
-      const result = await runExperimentWithProgress(experimentId, concurrency);
-      showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
+      await runExperimentWithProgress(experimentId, concurrency);
     } catch (error) {
       state.pendingRunId = null;
       if (error.message) showAlert(error.message, "danger");
@@ -600,6 +600,9 @@ async function runExperimentWithProgress(experimentId, concurrency) {
       if (!event) continue;
       if (event.event === "finished") {
         result = event.payload;
+        if (result?.stopped) {
+          showAlert(`Run ${result.run_id} stopped.`, "info");
+        }
         continue;
       }
       if (event.event === "error") {
@@ -614,6 +617,9 @@ async function runExperimentWithProgress(experimentId, concurrency) {
   }
   state.pendingRunId = null;
   await renderExperiment(experimentId);
+  if (!result.stopped) {
+    showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
+  }
   return result;
 }
 
@@ -680,8 +686,11 @@ async function refreshRunInState(experimentId, runId) {
   state.current.runs = runs;
   const completed = runs.filter((item) => item.status === "completed" || item.status === "completed_with_errors").length;
   const running = runs.some((item) => item.status === "running");
+  const stopped = runs.some((item) => item.status === "stopped");
   if (running) {
     state.current.status = "running";
+  } else if (stopped) {
+    state.current.status = "stopped";
   } else if (completed === runs.length && runs.length > 0) {
     state.current.status = runs.every((item) => item.status === "completed") ? "completed" : "completed_with_errors";
   }
@@ -697,6 +706,17 @@ function enrichRun(run) {
     completed_count: completedCount,
     failed_count: failedCount,
   };
+}
+
+async function stopRun(runId) {
+  const experimentId = state.current.id;
+  if (!confirm(`Stop run ${runId}?`)) return;
+  await api(`/api/experiments/${experimentId}/runs/${encodeURIComponent(runId)}/stop`, {
+    method: "POST",
+  });
+  state.pendingRunId = null;
+  showAlert(`Run ${runId} stopped.`, "info");
+  await renderExperiment(experimentId);
 }
 
 async function publishRun(runId) {
@@ -732,6 +752,8 @@ function statusBadge(status) {
     running: "primary",
     completed: "success",
     completed_with_errors: "warning",
+    stopped: "warning",
+    cancelled: "secondary",
     failed: "danger",
   };
   return `<span class="badge text-bg-${colors[status] || "secondary"}">${escapeHtml(status || "")}</span>`;

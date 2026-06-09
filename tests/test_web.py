@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from tests.conftest import mock_generate_result
 from cadybara_benchmark.run_files import get_run
-from cadybara_benchmark.services.experiments import create_experiment
+from cadybara_benchmark.services.experiments import create_experiment, get_experiment
 from cadybara_benchmark.services.queries import add_query
-from cadybara_benchmark.services.runs import run_experiment
+from cadybara_benchmark.services.runs import run_experiment, stop_run
 from cadybara_benchmark.web import (
     STATIC_DIR,
     _query_stl_path,
@@ -215,6 +216,67 @@ def test_compare_supports_image_prompt_ui():
 
     assert "formatQueryImagesBlock" in script
     assert "Reference image" in script
+
+
+class BlockingClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def generate(self, prompt, parameters):
+        self.started.set()
+        if not self.release.wait(timeout=5):
+            raise TimeoutError("Timed out waiting for release signal.")
+        return mock_generate_result()
+
+
+def test_stop_run_cancels_pending_queries(settings):
+    create_experiment("Stop Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", settings=settings)
+
+    client = BlockingClient()
+
+    def execute() -> None:
+        run_experiment("EXP001", client=client, settings=settings, concurrency=1)
+
+    thread = threading.Thread(target=execute)
+    thread.start()
+    assert client.started.wait(timeout=5)
+
+    stopped = stop_run("EXP001", "RUN001", settings=settings)
+    assert stopped["status"] == "stopped"
+
+    client.release.set()
+    thread.join(timeout=5)
+
+    run = get_run("EXP001", "RUN001", settings)
+    assert run["status"] == "stopped"
+    statuses = [query["status"] for query in run["queries"]]
+    assert statuses.count("cancelled") >= 1
+    assert get_experiment("EXP001", settings)["status"] == "stopped"
+
+
+def test_stop_run_rejects_non_running_run(settings):
+    create_experiment("Stop Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    try:
+        stop_run("EXP001", "RUN001", settings=settings)
+    except ValueError as exc:
+        assert "not running" in str(exc)
+    else:
+        raise AssertionError("Expected stop_run to reject a completed run")
+
+
+def test_app_renders_stop_button_for_running_runs():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert 'run.status === "running"' in script
+    assert "function stopRun" in script
+    assert "/stop" in script
+    assert "btn-outline-danger" in script
 
 
 def test_app_route_resets_modal_backdrop():

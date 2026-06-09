@@ -6,6 +6,7 @@ const state = {
   experiments: [],
   current: null,
   published: [],
+  pendingRunId: null,
 };
 
 const savedTheme = localStorage.getItem("theme") || "light";
@@ -91,7 +92,8 @@ async function renderExperiment(id) {
   renderExperimentPage(experiment);
 }
 
-function renderExperimentPage(experiment) {
+function renderExperimentPage(experiment, options = {}) {
+  const expandedRunIds = options.expandedRunIds ?? getExpandedRunIds();
   app.innerHTML = `
     <div class="page-header">
       <div>
@@ -145,6 +147,22 @@ function renderExperimentPage(experiment) {
   bindExperimentActions(experiment.id);
   bindQueryForm(experiment.id);
   bindRunsTable();
+  restoreExpandedRunIds(expandedRunIds);
+}
+
+function getExpandedRunIds() {
+  return Array.from(document.querySelectorAll('.run-row[aria-expanded="true"]')).map((row) => row.dataset.runId);
+}
+
+function restoreExpandedRunIds(runIds) {
+  runIds.forEach((runId) => {
+    const row = document.querySelector(`.run-row[data-run-id="${runId}"]`);
+    const detail = document.querySelector(`.run-detail-row[data-run-id="${runId}"]`);
+    if (!row || !detail) return;
+    row.setAttribute("aria-expanded", "true");
+    row.classList.add("expanded");
+    detail.classList.remove("d-none");
+  });
 }
 
 async function renderPublished() {
@@ -479,18 +497,16 @@ function bindExperimentActions(experimentId) {
     const concurrency = parseRunConcurrency();
     if (concurrency === null) return;
     if (!confirm(`Run this experiment against the Cadybara API with concurrency ${concurrency}?`)) return;
-    const runPromise = api(`/api/experiments/${experimentId}/run`, {
-      method: "POST",
-      body: JSON.stringify({ concurrency }),
-    });
 
     addOptimisticRun(experimentId);
     showAlert("Run started.", "info");
 
     try {
-      const result = await runPromise;
+      const result = await runExperimentWithProgress(experimentId, concurrency);
       showAlert(`Run finished: ${result.completed} completed, ${result.failed} failed.`, "success");
-    } finally {
+    } catch (error) {
+      state.pendingRunId = null;
+      if (error.message) showAlert(error.message, "danger");
       await renderExperiment(experimentId);
     }
   });
@@ -505,6 +521,7 @@ function addOptimisticRun(experimentId) {
   if (!state.current || state.current.id !== experimentId) return;
 
   const runId = nextOptimisticRunId(state.current.runs || []);
+  state.pendingRunId = runId;
   const startedAt = new Date().toISOString();
   const setup = state.current.setup || {};
   const defaultModel = setup.model || "default";
@@ -513,7 +530,7 @@ function addOptimisticRun(experimentId) {
     text: query.text,
     model: query.model || defaultModel,
     images: query.images || [],
-    status: "running",
+    status: "pending",
     error: {},
     artifact_dir: "",
     response_metadata: {},
@@ -554,6 +571,134 @@ function nextOptimisticRunId(runs) {
   return `RUN${String(highest + 1).padStart(3, "0")}`;
 }
 
+async function runExperimentWithProgress(experimentId, concurrency) {
+  const response = await fetch(`/api/experiments/${experimentId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ concurrency }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || response.statusText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = parseSseChunk(chunk);
+      if (!event) continue;
+      if (event.event === "finished") {
+        result = event.payload;
+        continue;
+      }
+      if (event.event === "error") {
+        throw new Error(event.payload.message || "Run failed.");
+      }
+      await handleRunProgressEvent(experimentId, event);
+    }
+  }
+
+  if (!result) {
+    throw new Error("Run finished without a summary.");
+  }
+  state.pendingRunId = null;
+  await renderExperiment(experimentId);
+  return result;
+}
+
+function parseSseChunk(chunk) {
+  const dataLine = chunk.split("\n").find((line) => line.startsWith("data: "));
+  if (!dataLine) return null;
+  return JSON.parse(dataLine.slice(6));
+}
+
+async function handleRunProgressEvent(experimentId, event) {
+  if (!state.current || state.current.id !== experimentId) return;
+
+  const { event: name, payload } = event;
+  if (name === "run_started") {
+    reconcileOptimisticRunId(payload.run_id);
+    state.current.status = "running";
+    renderExperimentPage(state.current);
+    return;
+  }
+
+  const runId = payload.run_id;
+  if (name === "started") {
+    updateQueryStatus(runId, payload.query_id, "running");
+    renderExperimentPage(state.current);
+    return;
+  }
+
+  if (name === "completed" || name === "failed") {
+    await refreshRunInState(experimentId, runId);
+    renderExperimentPage(state.current);
+  }
+}
+
+function reconcileOptimisticRunId(runId) {
+  if (!state.pendingRunId) {
+    state.pendingRunId = runId;
+    return;
+  }
+  if (state.pendingRunId === runId) return;
+  const run = state.current?.runs?.find((item) => item.id === state.pendingRunId);
+  if (run) run.id = runId;
+  state.pendingRunId = runId;
+}
+
+function updateQueryStatus(runId, queryId, status) {
+  const run = state.current?.runs?.find((item) => item.id === runId);
+  if (!run) return;
+  const query = (run.queries || []).find((item) => (item.query_id || item.id) === queryId);
+  if (!query) return;
+  query.status = status;
+  Object.assign(run, enrichRun(run));
+}
+
+async function refreshRunInState(experimentId, runId) {
+  const run = await api(`/api/experiments/${experimentId}/runs/${runId}`);
+  const runs = state.current?.runs || [];
+  const index = runs.findIndex((item) => item.id === runId);
+  const enriched = enrichRun(run);
+  if (index >= 0) {
+    runs[index] = enriched;
+  } else {
+    runs.push(enriched);
+  }
+  state.current.runs = runs;
+  const completed = runs.filter((item) => item.status === "completed" || item.status === "completed_with_errors").length;
+  const running = runs.some((item) => item.status === "running");
+  if (running) {
+    state.current.status = "running";
+  } else if (completed === runs.length && runs.length > 0) {
+    state.current.status = runs.every((item) => item.status === "completed") ? "completed" : "completed_with_errors";
+  }
+}
+
+function enrichRun(run) {
+  const queries = run.queries || [];
+  const completedCount = queries.filter((query) => query.status === "completed").length;
+  const failedCount = queries.filter((query) => query.status === "failed").length;
+  return {
+    ...run,
+    query_count: queries.length,
+    completed_count: completedCount,
+    failed_count: failedCount,
+  };
+}
+
 async function publishRun(runId) {
   const experimentId = state.current.id;
   const result = await api(`/api/experiments/${experimentId}/publish?run_id=${encodeURIComponent(runId)}`, {
@@ -583,6 +728,7 @@ function metric(label, value) {
 function statusBadge(status) {
   const colors = {
     draft: "secondary",
+    pending: "secondary",
     running: "primary",
     completed: "success",
     completed_with_errors: "warning",

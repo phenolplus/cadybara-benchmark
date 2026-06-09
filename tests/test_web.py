@@ -12,6 +12,7 @@ from cadybara_benchmark.web import (
     _query_stl_path,
     _run_payload,
     _run_query,
+    _sse_message,
     _with_run_stats,
     compare_viewer,
     stl_viewer,
@@ -126,12 +127,38 @@ def test_app_renders_client_latency():
 def test_app_optimistically_renders_started_run():
     script = (STATIC_DIR / "app.js").read_text()
 
-    assert "const runPromise = api" in script
+    assert "runExperimentWithProgress" in script
     assert "addOptimisticRun(experimentId);" in script
-    assert script.index("const runPromise = api") < script.index("addOptimisticRun(experimentId);")
+    assert "handleRunProgressEvent" in script
     assert "function nextOptimisticRunId" in script
-    assert 'status: "running"' in script
+    assert 'status: "pending"' in script
     assert 'showAlert("Run started.", "info");' in script
+
+
+def test_run_experiment_emits_progress_events(settings):
+    create_experiment("Stream Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    events: list[tuple[str, dict]] = []
+    run_experiment(
+        "EXP001",
+        client=FakeClient(),
+        settings=settings,
+        on_event=lambda event, payload: events.append((event, payload)),
+    )
+
+    event_names = [event for event, _payload in events]
+    assert event_names[0] == "run_started"
+    assert "started" in event_names
+    assert "completed" in event_names
+    assert events[0][1]["run_id"] == "RUN001"
+
+
+def test_sse_message_format():
+    message = _sse_message("started", {"run_id": "RUN001", "query_id": "Q001"})
+    assert message.startswith("data: ")
+    assert message.endswith("\n\n")
+    assert '"event": "started"' in message
 
 
 def test_app_supports_run_concurrency():

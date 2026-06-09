@@ -112,6 +112,12 @@ def run_experiment(
     }
     save_run_summary(run_summary, settings)
 
+    if on_event:
+        on_event(
+            "run_started",
+            {"run_id": run_id, "experiment_id": experiment_id},
+        )
+
     completed = 0
     failed = 0
     summary_lock = threading.Lock()
@@ -121,6 +127,9 @@ def run_experiment(
         query = queries[index]
         query_entry = query_entries[index]
 
+        query_entry["status"] = "running"
+        with summary_lock:
+            save_run_summary(run_summary, settings)
         if on_event:
             on_event(
                 "started",
@@ -232,7 +241,7 @@ def _initial_query_entry(
         "text": query["text"],
         "model": query.get("model") or default_model,
         "images": query_image_api_entries(experiment_id, query["id"], stored_images),
-        "status": "running",
+        "status": "pending",
         "error": {},
         "artifact_dir": "",
         "response_metadata": {},

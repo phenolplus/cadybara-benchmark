@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import queue
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
@@ -138,17 +141,47 @@ def api_add_query(experiment_id: str, payload: QueryCreate) -> dict[str, Any]:
 
 
 @app.post("/api/experiments/{experiment_id}/run")
-def api_run_experiment(experiment_id: str, payload: RunRequest) -> dict[str, Any]:
+def api_run_experiment(experiment_id: str, payload: RunRequest) -> StreamingResponse:
     try:
         get_settings().require_api_key()
-        return run_experiment(
-            experiment_id,
-            payload.model,
-            payload.parameters,
-            concurrency=payload.concurrency,
-        )
     except Exception as exc:
         raise _http_error(exc) from exc
+
+    def stream_run_events() -> Iterator[str]:
+        events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def on_event(event: str, event_payload: dict[str, Any]) -> None:
+            events.put((event, event_payload))
+
+        def execute_run() -> None:
+            try:
+                result = run_experiment(
+                    experiment_id,
+                    payload.model,
+                    payload.parameters,
+                    concurrency=payload.concurrency,
+                    on_event=on_event,
+                )
+                events.put(("finished", result))
+            except Exception as exc:
+                events.put(("error", {"message": str(exc) or exc.__class__.__name__}))
+            finally:
+                events.put(None)
+
+        threading.Thread(target=execute_run, daemon=True).start()
+
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            event, event_payload = item
+            yield _sse_message(event, event_payload)
+
+    return StreamingResponse(stream_run_events(), media_type="text/event-stream")
+
+
+def _sse_message(event: str, payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps({'event': event, 'payload': payload})}\n\n"
 
 
 @app.post("/api/experiments/{experiment_id}/publish")

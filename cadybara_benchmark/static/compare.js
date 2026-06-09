@@ -151,6 +151,7 @@ function createBlockShell(item) {
         <div class="label">Prompt</div>
         <div class="value">${escapeHtml(query.text || "")}</div>
       </div>
+      ${formatQueryImagesBlock(query.images)}
       ${formatClientLatencyBlock(query)}
       ${formatMetricsBlock(query.metrics)}
       ${query.status === "failed" ? `<div class="error">${escapeHtml(formatError(query.error))}</div>` : ""}
@@ -486,6 +487,20 @@ function formatError(error) {
   if (typeof error === "string") return error;
   if (error && typeof error.message === "string") return error.message;
   return JSON.stringify(error);
+}
+
+function formatQueryImagesBlock(images) {
+  if (!images?.length) return "";
+  return `
+    <div>
+      <div class="label">Reference image</div>
+      <div class="value compare-query-images">
+        ${images.map((image) => `
+          <img class="query-image-thumb" src="${escapeAttr(image.url)}" alt="Reference image" loading="lazy">
+        `).join("")}
+      </div>
+    </div>
+  `;
 }
 
 function formatClientLatencyBlock(query) {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -84,9 +85,16 @@ def add_query(
     text: Annotated[str | None, typer.Option(prompt=True)] = None,
     category: Annotated[str, typer.Option()] = "",
     model: Annotated[str | None, typer.Option()] = None,
+    image_path: Annotated[list[Path] | None, typer.Option(help="Reference image file(s)")] = None,
 ) -> None:
     try:
-        query = add_query_service(experiment_id, text or "", category, model)
+        query = add_query_service(
+            experiment_id,
+            text or "",
+            category,
+            model,
+            image_paths=image_path,
+        )
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         _handle_error(exc)

@@ -133,7 +133,7 @@ def test_app_renders_client_latency():
     script = (STATIC_DIR / "app.js").read_text()
 
     assert "Avg client latency" in script
-    assert "Client latency" in script
+    assert "client latency" in script
     assert "getClientLatencyMs" in script
 
 
@@ -178,6 +178,22 @@ def test_compare_disables_camera_controls_for_dnf_viewports():
     assert "isDnf" in script
     assert ".compare-viewport.is-empty .compare-viewport-stage" in css
     assert "pointer-events: none" in css
+
+
+def test_app_supports_image_prompt_ui():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert 'name="image"' in script
+    assert "readImagePayload" in script
+    assert "formatQueryImages" in script
+    assert "Reference image" in script
+
+
+def test_compare_supports_image_prompt_ui():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert "formatQueryImagesBlock" in script
+    assert "Reference image" in script
 
 
 def test_app_route_resets_modal_backdrop():

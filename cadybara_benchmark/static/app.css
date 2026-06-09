@@ -77,6 +77,21 @@ body {
   white-space: normal;
 }
 
+.query-images,
+.compare-query-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+
+.query-image-thumb {
+  border: 1px solid var(--bs-border-color);
+  border-radius: .375rem;
+  height: 4.5rem;
+  object-fit: cover;
+  width: 4.5rem;
+}
+
 .metrics-cell {
   max-width: 18rem;
   white-space: normal;

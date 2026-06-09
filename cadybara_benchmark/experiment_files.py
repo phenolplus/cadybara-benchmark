@@ -69,6 +69,9 @@ def dumps_experiment_yaml(experiment: dict[str, Any]) -> str:
                 f"    metadata: {_format_scalar(query.get('metadata', {}))}",
             ]
         )
+        images = query.get("images") or []
+        if images:
+            lines.append(f"    images: {_format_scalar(images)}")
     return "\n".join(lines) + "\n"
 
 

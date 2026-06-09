@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from cadybara_benchmark.config import REPO_ROOT, get_settings
 from cadybara_benchmark.metrics import average_client_latency_ms, client_latency_ms
@@ -17,6 +17,7 @@ from cadybara_benchmark.services.experiments import (
     get_experiment,
     list_experiments,
 )
+from cadybara_benchmark.query_images import resolve_query_image_path
 from cadybara_benchmark.services.queries import add_query, list_queries
 from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.runs import (
@@ -40,11 +41,23 @@ class ExperimentCreate(BaseModel):
     setup: dict[str, Any] | None = None
 
 
+class QueryImageCreate(BaseModel):
+    media_type: str = Field(min_length=1)
+    data: str = Field(min_length=1)
+
+
 class QueryCreate(BaseModel):
-    text: str = Field(min_length=1)
+    text: str = ""
     model: str | None = None
     category: str | None = None
     metadata: dict[str, Any] | None = None
+    images: list[QueryImageCreate] | None = None
+
+    @model_validator(mode="after")
+    def validate_text_or_images(self) -> QueryCreate:
+        if not self.text.strip() and not self.images:
+            raise ValueError("Query requires text or at least one image.")
+        return self
 
 
 class RunRequest(BaseModel):
@@ -108,12 +121,16 @@ def api_get_experiment(experiment_id: str) -> dict[str, Any]:
 @app.post("/api/experiments/{experiment_id}/queries", status_code=201)
 def api_add_query(experiment_id: str, payload: QueryCreate) -> dict[str, Any]:
     try:
+        images = (
+            [image.model_dump() for image in payload.images] if payload.images else None
+        )
         return add_query(
             experiment_id,
             payload.text,
             category=payload.category,
             model=payload.model,
             metadata=payload.metadata,
+            images=images,
         )
     except Exception as exc:
         raise _http_error(exc) from exc
@@ -150,6 +167,24 @@ def api_get_run_query(experiment_id: str, run_id: str, query_id: str) -> dict[st
         return _run_query(experiment_id, run_id, query_id)
     except Exception as exc:
         raise _http_error(exc) from exc
+
+
+@app.get("/api/experiments/{experiment_id}/queries/{query_id}/images/{image_index}")
+def api_get_query_image(experiment_id: str, query_id: str, image_index: int) -> FileResponse:
+    try:
+        experiment = get_experiment(experiment_id)
+        stored_query = next(
+            (item for item in experiment.get("queries", []) if item.get("id") == query_id),
+            None,
+        )
+        if stored_query is None:
+            raise ValueError(f"Query not found: {query_id}")
+        stored_images = stored_query.get("images") or []
+        image_path = resolve_query_image_path(experiment_id, query_id, image_index, stored_images)
+    except Exception as exc:
+        raise _http_error(exc) from exc
+    media_type = stored_images[image_index].get("media_type", "application/octet-stream")
+    return FileResponse(image_path, media_type=str(media_type), filename=image_path.name)
 
 
 @app.get("/api/experiments/{experiment_id}/runs/{run_id}/queries/{query_id}/stl")

@@ -184,13 +184,14 @@ function queriesTable(queries) {
   return `
     <div class="table-responsive">
       <table class="table">
-        <thead><tr><th>ID</th><th>Model</th><th>Category</th><th>Text</th></tr></thead>
+        <thead><tr><th>ID</th><th>Model</th><th>Category</th><th>Image</th><th>Text</th></tr></thead>
         <tbody>
           ${queries.map((query) => `
             <tr>
               <td class="fw-semibold">${escapeHtml(query.id)}</td>
               <td class="small">${escapeHtml(query.model || "(default)")}</td>
               <td>${escapeHtml(query.category || "")}</td>
+              <td>${formatQueryImages(query.images)}</td>
               <td class="query-text">${escapeHtml(query.text || "")}</td>
             </tr>
           `).join("")}
@@ -255,7 +256,8 @@ function runQueriesTable(queries, experimentId, runId) {
             <td>${statusBadge(query.status)}</td>
             <td class="metrics-cell query-metrics-cell">${formatQueryMetrics(query)}</td>
             <td class="query-text">
-              ${escapeHtml(query.text || "")}
+              ${formatQueryImages(query.images)}
+              ${query.images?.length ? `<div class="mt-2">${escapeHtml(query.text || "")}</div>` : escapeHtml(query.text || "")}
               ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
             </td>
             <td class="text-nowrap">
@@ -399,8 +401,13 @@ function queryModal(experimentId) {
                 <input class="form-control" name="model" placeholder="Leave blank for experiment default">
               </div>
               <div class="col-12">
+                <label class="form-label">Reference image</label>
+                <input class="form-control" type="file" name="image" accept="image/jpeg,image/png,image/webp,image/gif">
+                <div class="form-text">Optional. Provide an image prompt, query text, or both.</div>
+              </div>
+              <div class="col-12">
                 <label class="form-label">Query text</label>
-                <textarea class="form-control" name="text" rows="5" required></textarea>
+                <textarea class="form-control" name="text" rows="5"></textarea>
               </div>
             </div>
           </div>
@@ -430,10 +437,23 @@ function bindExperimentForm() {
 function bindQueryForm(experimentId) {
   document.querySelector("#queryForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.target));
+    const formData = new FormData(event.target);
+    const payload = blankToNull({
+      text: formData.get("text") || "",
+      model: formData.get("model"),
+      category: formData.get("category"),
+    });
+    const imageFile = formData.get("image");
+    if (imageFile && imageFile.size > 0) {
+      payload.images = [await readImagePayload(imageFile)];
+    }
+    if (!String(payload.text || "").trim() && !payload.images?.length) {
+      showAlert("Add query text, a reference image, or both.", "danger");
+      return;
+    }
     await api(`/api/experiments/${experimentId}/queries`, {
       method: "POST",
-      body: JSON.stringify(blankToNull(data)),
+      body: JSON.stringify(payload),
     });
     showAlert("Query added.", "success");
     await renderExperiment(experimentId);
@@ -476,6 +496,7 @@ function addOptimisticRun(experimentId) {
     query_id: query.id,
     text: query.text,
     model: query.model || defaultModel,
+    images: query.images || [],
     status: "running",
     error: {},
     artifact_dir: "",
@@ -556,6 +577,48 @@ function statusBadge(status) {
 
 function blankToNull(data) {
   return Object.fromEntries(Object.entries(data).map(([key, value]) => [key, value === "" ? null : value]));
+}
+
+function formatQueryImages(images) {
+  if (!images?.length) {
+    return `<span class="text-body-secondary small">—</span>`;
+  }
+  return `
+    <div class="query-images">
+      ${images.map((image) => `
+        <img class="query-image-thumb" src="${escapeAttr(image.url)}" alt="Reference image" loading="lazy">
+      `).join("")}
+    </div>
+  `;
+}
+
+async function readImagePayload(file) {
+  const data = await fileToBase64(file);
+  return {
+    media_type: file.type || inferImageMediaType(file.name),
+    data,
+  };
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error("Failed to read image file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function inferImageMediaType(filename) {
+  const extension = String(filename || "").split(".").pop()?.toLowerCase();
+  if (extension === "png") return "image/png";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  return "image/jpeg";
 }
 
 function formatError(error) {

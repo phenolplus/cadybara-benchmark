@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from cadybara_benchmark.api_client import CadybaraApiClient, CadybaraApiError
+from cadybara_benchmark.query_images import load_api_images, query_image_api_entries
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
 from cadybara_benchmark.ids import next_run_id
 from cadybara_benchmark.json_utils import dumps_json, loads_json
@@ -15,7 +16,6 @@ from cadybara_benchmark.run_files import (
     save_run_summary,
 )
 from cadybara_benchmark.services.experiments import get_experiment, update_experiment_status
-from cadybara_benchmark.services.queries import list_queries
 from cadybara_benchmark.time import utc_now
 
 
@@ -59,7 +59,7 @@ def run_experiment(
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     experiment = get_experiment(experiment_id, settings)
-    queries = list_queries(experiment_id, settings)
+    queries = experiment.get("queries", [])
     if not queries:
         raise ValueError(f"Experiment {experiment_id} has no queries to run.")
 
@@ -101,10 +101,12 @@ def run_experiment(
     for query in queries:
         query_model = query.get("model") or default_model
         full_parameters = {**base_parameters, "model": query_model}
+        stored_images = query.get("images") or []
         query_entry: dict[str, Any] = {
             "query_id": query["id"],
             "text": query["text"],
             "model": query_model,
+            "images": query_image_api_entries(experiment_id, query["id"], stored_images),
             "status": "running",
             "error": {},
             "artifact_dir": "",
@@ -126,6 +128,9 @@ def run_experiment(
         query_entry["artifact_dir"] = _stored_path(artifact_dir)
 
         try:
+            api_images = load_api_images(stored_images)
+            if api_images:
+                full_parameters = {**full_parameters, "images": api_images}
             result = client.generate(query["text"], full_parameters)
             stl_path = artifact_dir / "model.stl"
             stl_path.write_bytes(result.stl_bytes)

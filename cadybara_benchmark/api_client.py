@@ -56,6 +56,9 @@ class CadybaraApiClient:
         model = parameters.get("model")
         if model:
             body["model"] = model
+        images = parameters.get("images")
+        if images:
+            body["images"] = images
         started = time.perf_counter()
         try:
             response = requests.post(

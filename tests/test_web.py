@@ -148,6 +148,14 @@ def test_app_optimistically_renders_started_run():
     assert 'showAlert("Run started.", "info");' in script
 
 
+def test_app_supports_run_concurrency():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert 'id="runConcurrency"' in script
+    assert "function parseRunConcurrency" in script
+    assert "JSON.stringify({ concurrency })" in script
+
+
 def test_compare_renders_metrics_list():
     script = (STATIC_DIR / "compare.js").read_text()
 

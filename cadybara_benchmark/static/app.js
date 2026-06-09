@@ -102,6 +102,10 @@ function renderExperimentPage(experiment) {
       <div class="toolbar">
         <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#queryModal">Add query</button>
         <button class="btn btn-outline-primary" id="publishExperiment">Publish completed</button>
+        <label class="d-flex align-items-center gap-2 mb-0 small text-body-secondary" for="runConcurrency">
+          <span>Concurrency</span>
+          <input class="form-control form-control-sm" id="runConcurrency" type="number" min="1" step="1" value="1" style="width: 5rem;">
+        </label>
         <button class="btn btn-primary" id="runExperiment">Run experiment</button>
       </div>
     </div>
@@ -460,12 +464,24 @@ function bindQueryForm(experimentId) {
   });
 }
 
+function parseRunConcurrency() {
+  const input = document.querySelector("#runConcurrency");
+  const value = Number.parseInt(input?.value ?? "1", 10);
+  if (!Number.isFinite(value) || value < 1) {
+    showAlert("Concurrency must be a whole number of at least 1.", "danger");
+    return null;
+  }
+  return value;
+}
+
 function bindExperimentActions(experimentId) {
   document.querySelector("#runExperiment").addEventListener("click", async () => {
-    if (!confirm("Run this experiment against the Cadybara API now?")) return;
+    const concurrency = parseRunConcurrency();
+    if (concurrency === null) return;
+    if (!confirm(`Run this experiment against the Cadybara API with concurrency ${concurrency}?`)) return;
     const runPromise = api(`/api/experiments/${experimentId}/run`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ concurrency }),
     });
 
     addOptimisticRun(experimentId);

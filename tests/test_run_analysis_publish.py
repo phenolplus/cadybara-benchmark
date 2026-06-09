@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 from cadybara_benchmark.api_client import GenerateResult
 from cadybara_benchmark.publishing import publish_experiment
@@ -154,6 +156,61 @@ def test_run_uses_query_model_over_experiment_default(settings):
         "default-model",
         "query-model",
     ]
+
+
+class ConcurrentTrackingClient:
+    def __init__(self, delay_seconds: float = 0.05):
+        self.delay_seconds = delay_seconds
+        self.active = 0
+        self.max_active = 0
+        self.lock = threading.Lock()
+        self.calls: list[dict] = []
+
+    def generate(self, prompt, parameters):
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            self.calls.append({"prompt": prompt, "parameters": parameters})
+        try:
+            time.sleep(self.delay_seconds)
+            return GenerateResult(
+                stl_bytes=b"solid mock\nendsolid mock\n",
+                generated_code="import cadquery as cq",
+                raw_response={"metrics": {"latency": 1.0}},
+                response_metadata={"latency_ms": 100, "response_mode": "json"},
+            )
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+def test_run_experiment_respects_concurrency(settings):
+    create_experiment("Concurrent Run", settings=settings)
+    for index in range(4):
+        add_query("EXP001", f"Create part {index}.", settings=settings)
+
+    client = ConcurrentTrackingClient()
+    summary = run_experiment("EXP001", client=client, settings=settings, concurrency=2)
+
+    assert summary["completed"] == 4
+    assert summary["failed"] == 0
+    assert client.max_active == 2
+    assert len(client.calls) == 4
+
+    run = list_runs("EXP001", settings)[0]
+    assert run["parameters"]["concurrency"] == 2
+    assert [query["status"] for query in run["queries"]] == ["completed"] * 4
+
+
+def test_run_experiment_defaults_to_sequential_concurrency(settings):
+    create_experiment("Sequential Run", settings=settings)
+    for index in range(3):
+        add_query("EXP001", f"Create part {index}.", settings=settings)
+
+    client = ConcurrentTrackingClient()
+    run_experiment("EXP001", client=client, settings=settings)
+
+    assert client.max_active == 1
 
 
 def test_next_run_id_increments(settings):

@@ -63,6 +63,7 @@ class QueryCreate(BaseModel):
 class RunRequest(BaseModel):
     model: str | None = None
     parameters: dict[str, Any] | None = None
+    concurrency: int = Field(default=1, ge=1)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -140,7 +141,12 @@ def api_add_query(experiment_id: str, payload: QueryCreate) -> dict[str, Any]:
 def api_run_experiment(experiment_id: str, payload: RunRequest) -> dict[str, Any]:
     try:
         get_settings().require_api_key()
-        return run_experiment(experiment_id, payload.model, payload.parameters)
+        return run_experiment(
+            experiment_id,
+            payload.model,
+            payload.parameters,
+            concurrency=payload.concurrency,
+        )
     except Exception as exc:
         raise _http_error(exc) from exc
 

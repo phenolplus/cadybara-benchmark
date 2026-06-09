@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -56,12 +58,15 @@ def run_experiment(
     client: CadybaraApiClient | None = None,
     settings: Settings | None = None,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    concurrency: int = 1,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     experiment = get_experiment(experiment_id, settings)
     queries = experiment.get("queries", [])
     if not queries:
         raise ValueError(f"Experiment {experiment_id} has no queries to run.")
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
 
     parameters = parameters or {}
     default_model = model or experiment["setup"].get("model", "default")
@@ -77,12 +82,16 @@ def run_experiment(
             "angular_deflection",
             experiment["setup"].get("angular_deflection", settings.default_angular_deflection),
         ),
+        "concurrency": concurrency,
     }
     client = client or CadybaraApiClient(settings)
     update_experiment_status(experiment_id, "running", settings)
 
     run_id = next_run_id(experiment_id, settings)
     started_at = utc_now()
+    query_entries = [
+        _initial_query_entry(experiment_id, query, default_model) for query in queries
+    ]
     run_summary: dict[str, Any] = {
         "id": run_id,
         "experiment_id": experiment_id,
@@ -90,32 +99,19 @@ def run_experiment(
         "started_at": started_at,
         "finished_at": "",
         "parameters": base_parameters,
-        "queries": [],
+        "queries": query_entries,
         "summary": {"completed": 0, "failed": 0},
     }
     save_run_summary(run_summary, settings)
 
     completed = 0
     failed = 0
+    summary_lock = threading.Lock()
 
-    for query in queries:
-        query_model = query.get("model") or default_model
-        full_parameters = {**base_parameters, "model": query_model}
-        stored_images = query.get("images") or []
-        query_entry: dict[str, Any] = {
-            "query_id": query["id"],
-            "text": query["text"],
-            "model": query_model,
-            "images": query_image_api_entries(experiment_id, query["id"], stored_images),
-            "status": "running",
-            "error": {},
-            "artifact_dir": "",
-            "response_metadata": {},
-            "score": None,
-            "metrics": {},
-        }
-        run_summary["queries"].append(query_entry)
-        save_run_summary(run_summary, settings)
+    def execute_query(index: int) -> None:
+        nonlocal completed, failed
+        query = queries[index]
+        query_entry = query_entries[index]
 
         if on_event:
             on_event(
@@ -127,7 +123,12 @@ def run_experiment(
         artifact_dir.mkdir(parents=True, exist_ok=True)
         query_entry["artifact_dir"] = _stored_path(artifact_dir)
 
+        query_completed = 0
+        query_failed = 0
         try:
+            query_model = query.get("model") or default_model
+            full_parameters = {**base_parameters, "model": query_model}
+            stored_images = query.get("images") or []
             api_images = load_api_images(stored_images)
             if api_images:
                 full_parameters = {**full_parameters, "images": api_images}
@@ -142,7 +143,7 @@ def run_experiment(
             query_entry["status"] = "completed"
             query_entry["response_metadata"] = result.response_metadata
             query_entry["metrics"] = result.raw_response.get("metrics", {})
-            completed += 1
+            query_completed = 1
             if on_event:
                 on_event(
                     "completed",
@@ -153,7 +154,7 @@ def run_experiment(
             error_path.write_text(dumps_json(exc.payload))
             query_entry["status"] = "failed"
             query_entry["error"] = exc.payload
-            failed += 1
+            query_failed = 1
             if on_event:
                 on_event(
                     "failed",
@@ -169,7 +170,7 @@ def run_experiment(
             error_path.write_text(dumps_json(error))
             query_entry["status"] = "failed"
             query_entry["error"] = error
-            failed += 1
+            query_failed = 1
             if on_event:
                 on_event(
                     "failed",
@@ -180,8 +181,17 @@ def run_experiment(
                     },
                 )
 
-        run_summary["summary"] = {"completed": completed, "failed": failed}
-        save_run_summary(run_summary, settings)
+        with summary_lock:
+            completed += query_completed
+            failed += query_failed
+            run_summary["summary"] = {"completed": completed, "failed": failed}
+            save_run_summary(run_summary, settings)
+
+    worker_count = min(concurrency, len(queries))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [executor.submit(execute_query, index) for index in range(len(queries))]
+        for future in futures:
+            future.result()
 
     run_summary["status"] = "completed" if failed == 0 else "completed_with_errors"
     run_summary["finished_at"] = utc_now()
@@ -196,6 +206,26 @@ def run_experiment(
         "run_ids": [run_id],
         "completed": completed,
         "failed": failed,
+    }
+
+
+def _initial_query_entry(
+    experiment_id: str,
+    query: dict[str, Any],
+    default_model: str,
+) -> dict[str, Any]:
+    stored_images = query.get("images") or []
+    return {
+        "query_id": query["id"],
+        "text": query["text"],
+        "model": query.get("model") or default_model,
+        "images": query_image_api_entries(experiment_id, query["id"], stored_images),
+        "status": "running",
+        "error": {},
+        "artifact_dir": "",
+        "response_metadata": {},
+        "score": None,
+        "metrics": {},
     }
 
 

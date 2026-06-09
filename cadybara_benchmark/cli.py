@@ -129,6 +129,7 @@ def run(
     linear_deflection: Annotated[float | None, typer.Option()] = None,
     angular_deflection: Annotated[float | None, typer.Option()] = None,
     response_mode: Annotated[str, typer.Option()] = "json",
+    concurrency: Annotated[int, typer.Option(min=1)] = 1,
 ) -> None:
     settings = get_settings()
     try:
@@ -150,7 +151,12 @@ def run(
                 typer.echo(f"Failed {payload['query_id']} in {payload['run_id']}")
 
         summary = run_experiment(
-            experiment_id, model, parameters, settings=settings, on_event=progress
+            experiment_id,
+            model,
+            parameters,
+            settings=settings,
+            on_event=progress,
+            concurrency=concurrency,
         )
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)

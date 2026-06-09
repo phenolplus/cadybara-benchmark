@@ -129,11 +129,17 @@ def run(
     linear_deflection: Annotated[float | None, typer.Option()] = None,
     angular_deflection: Annotated[float | None, typer.Option()] = None,
     response_mode: Annotated[str, typer.Option()] = "json",
+    output_format: Annotated[
+        str,
+        typer.Option(help="Local artifact format after each query: stl (default) or step."),
+    ] = "stl",
     concurrency: Annotated[int, typer.Option(min=1)] = 1,
 ) -> None:
     settings = get_settings()
     try:
         settings.require_api_key()
+        if output_format not in {"stl", "step"}:
+            raise ValueError("output_format must be 'stl' or 'step'")
         parameters = {"response_mode": response_mode}
         if linear_deflection is not None:
             parameters["linear_deflection"] = linear_deflection
@@ -157,6 +163,7 @@ def run(
             settings=settings,
             on_event=progress,
             concurrency=concurrency,
+            output_format=output_format,
         )
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
@@ -174,21 +181,33 @@ def submit_query_command(
     linear_deflection: Annotated[float | None, typer.Option()] = None,
     angular_deflection: Annotated[float | None, typer.Option()] = None,
     response_mode: Annotated[str, typer.Option()] = "json",
+    return_format: Annotated[str, typer.Option()] = "code",
+    output_format: Annotated[
+        str,
+        typer.Option(help="Local artifact format after generation: stl (default) or step."),
+    ] = "stl",
 ) -> None:
     try:
-        parameters = {"response_mode": response_mode}
+        if output_format not in {"stl", "step"}:
+            raise ValueError("output_format must be 'stl' or 'step'")
+        parameters = {
+            "response_mode": response_mode,
+            "return_format": return_format,
+        }
         if model:
             parameters["model"] = model
         if linear_deflection is not None:
             parameters["linear_deflection"] = linear_deflection
         if angular_deflection is not None:
             parameters["angular_deflection"] = angular_deflection
-        result = submit_query(text or "", parameters)
+        result = submit_query(text or "", parameters, output_format=output_format)
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         _handle_error(exc)
     typer.echo(f"Submitted direct query {result['submission_id']}")
     typer.echo(f"STL: {result['stl_path']}")
+    if result.get("step_path"):
+        typer.echo(f"STEP: {result['step_path']}")
     typer.echo(f"Response: {result['response_path']}")
     typer.echo(f"Metadata: {result['metadata_path']}")
 

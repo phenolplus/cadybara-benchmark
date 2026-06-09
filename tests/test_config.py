@@ -12,6 +12,7 @@ def test_require_api_key_rejects_missing(tmp_path):
         workspace_dir=tmp_path / "workspace",
         published_dir=tmp_path / "published",
         default_response_mode="json",
+        default_return_format="code",
         default_linear_deflection=0.1,
         default_angular_deflection=0.1,
         request_timeout_seconds=180,

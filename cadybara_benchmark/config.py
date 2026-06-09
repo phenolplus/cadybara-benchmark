@@ -29,6 +29,7 @@ class Settings:
     workspace_dir: Path
     published_dir: Path
     default_response_mode: str
+    default_return_format: str
     default_linear_deflection: float
     default_angular_deflection: float
     request_timeout_seconds: int
@@ -49,6 +50,7 @@ def get_settings() -> Settings:
         workspace_dir=_path_from_env("CADYBARA_WORKSPACE_DIR", "workspace"),
         published_dir=_path_from_env("CADYBARA_PUBLISHED_DIR", "published"),
         default_response_mode=os.getenv("CADYBARA_DEFAULT_RESPONSE_MODE", "json"),
+        default_return_format=os.getenv("CADYBARA_DEFAULT_RETURN_FORMAT", "code"),
         default_linear_deflection=float(os.getenv("CADYBARA_DEFAULT_LINEAR_DEFLECTION", "0.1")),
         default_angular_deflection=float(os.getenv("CADYBARA_DEFAULT_ANGULAR_DEFLECTION", "0.1")),
         request_timeout_seconds=int(os.getenv("CADYBARA_REQUEST_TIMEOUT_SECONDS", "180")),

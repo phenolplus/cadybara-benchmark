@@ -17,6 +17,7 @@ def default_setup(settings: Settings | None = None) -> dict[str, Any]:
     return {
         "model": "default",
         "response_mode": settings.default_response_mode,
+        "return_format": settings.default_return_format,
         "linear_deflection": settings.default_linear_deflection,
         "angular_deflection": settings.default_angular_deflection,
     }

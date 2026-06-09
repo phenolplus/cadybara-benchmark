@@ -10,6 +10,7 @@ def test_create_experiment_stores_default_setup(settings):
     assert experiment["id"] == "EXP001"
     assert experiment["status"] == "draft"
     assert experiment["setup"]["response_mode"] == "json"
+    assert experiment["setup"]["return_format"] == "code"
     assert (settings.workspace_dir / "experiments" / "EXP001.yaml").exists()
 
 

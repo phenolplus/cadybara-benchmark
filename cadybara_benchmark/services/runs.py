@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from cadybara_benchmark.api_client import CadybaraApiClient, CadybaraApiError
+from cadybara_benchmark.geometry import write_generate_artifacts
 from cadybara_benchmark.query_images import load_api_images, query_image_api_entries
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
 from cadybara_benchmark.ids import next_run_id
@@ -59,6 +60,7 @@ def run_experiment(
     settings: Settings | None = None,
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
     concurrency: int = 1,
+    output_format: str = "stl",
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     experiment = get_experiment(experiment_id, settings)
@@ -67,13 +69,18 @@ def run_experiment(
         raise ValueError(f"Experiment {experiment_id} has no queries to run.")
     if concurrency < 1:
         raise ValueError("concurrency must be at least 1")
-
-    parameters = parameters or {}
+    parameters = dict(parameters or {})
+    output_format = str(parameters.pop("output_format", output_format))
+    if output_format not in {"stl", "step"}:
+        raise ValueError("output_format must be 'stl' or 'step'")
     default_model = model or experiment["setup"].get("model", "default")
+    return_format = _resolve_return_format(parameters, experiment["setup"], settings)
     base_parameters = {
         "response_mode": parameters.get(
             "response_mode", experiment["setup"].get("response_mode", settings.default_response_mode)
         ),
+        "return_format": return_format,
+        "export_format": return_format,
         "linear_deflection": parameters.get(
             "linear_deflection",
             experiment["setup"].get("linear_deflection", settings.default_linear_deflection),
@@ -83,6 +90,7 @@ def run_experiment(
             experiment["setup"].get("angular_deflection", settings.default_angular_deflection),
         ),
         "concurrency": concurrency,
+        "output_format": output_format,
     }
     client = client or CadybaraApiClient(settings)
     update_experiment_status(experiment_id, "running", settings)
@@ -127,19 +135,23 @@ def run_experiment(
         query_failed = 0
         try:
             query_model = query.get("model") or default_model
-            full_parameters = {**base_parameters, "model": query_model}
+            full_parameters = {
+                key: value
+                for key, value in {**base_parameters, "model": query_model}.items()
+                if key != "concurrency"
+            }
             stored_images = query.get("images") or []
             api_images = load_api_images(stored_images)
             if api_images:
                 full_parameters = {**full_parameters, "images": api_images}
             result = client.generate(query["text"], full_parameters)
-            stl_path = artifact_dir / "model.stl"
-            stl_path.write_bytes(result.stl_bytes)
-            response_path = artifact_dir / "response.json"
-            response_path.write_text(dumps_json(result.raw_response))
-            if result.generated_code:
-                code_path = artifact_dir / "generated_code.py"
-                code_path.write_text(result.generated_code)
+            write_generate_artifacts(
+                artifact_dir,
+                result,
+                linear_deflection=base_parameters["linear_deflection"],
+                angular_deflection=base_parameters["angular_deflection"],
+                output_format=output_format,
+            )
             query_entry["status"] = "completed"
             query_entry["response_metadata"] = result.response_metadata
             query_entry["metrics"] = result.raw_response.get("metrics", {})
@@ -247,6 +259,16 @@ def _query_result(run: dict[str, Any], query: dict[str, Any]) -> dict[str, Any]:
         "stl_paths": [_stored_path(stl_path)] if stl_path.exists() else [],
         "artifact_paths": [_stored_path(response_path)] if response_path.exists() else [],
     }
+
+
+def _resolve_return_format(
+    parameters: dict[str, Any],
+    experiment_setup: dict[str, Any],
+    settings: Settings,
+) -> str:
+    if parameters.get("return_format"):
+        return str(parameters["return_format"])
+    return str(experiment_setup.get("return_format", settings.default_return_format))
 
 
 def _resolve_path(path: str) -> Path:

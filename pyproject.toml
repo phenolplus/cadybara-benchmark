@@ -9,6 +9,7 @@ description = "Local benchmark CLI for Cadybara Agent API experiments"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "cadquery>=2.4",
   "fastapi>=0.111",
   "typer>=0.12",
   "python-dotenv>=1.0",
@@ -24,6 +25,7 @@ dev = [
 
 [project.scripts]
 cadybara-benchmark = "cadybara_benchmark.cli:app"
+import-cadgenbench = "cadybara_benchmark.cadgenbench_cli:app"
 
 [tool.setuptools.packages.find]
 include = ["cadybara_benchmark*"]

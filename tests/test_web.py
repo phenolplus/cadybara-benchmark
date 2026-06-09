@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from cadybara_benchmark.api_client import GenerateResult
+from tests.conftest import mock_generate_result
 from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.experiments import create_experiment
 from cadybara_benchmark.services.queries import add_query
@@ -20,21 +20,7 @@ from cadybara_benchmark.web import (
 
 class FakeClient:
     def generate(self, prompt, parameters):
-        return GenerateResult(
-            stl_bytes=b"solid mock\nendsolid mock\n",
-            generated_code="import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)",
-            raw_response={
-                "generated_code": "import cadquery as cq",
-                "stl_base64": "...",
-                "metrics": {
-                    "credit_use": 100,
-                    "latency": 1.25,
-                    "steps": 4,
-                    "tool_calls": 9,
-                },
-            },
-            response_metadata={"latency_ms": 100, "response_mode": "json"},
-        )
+        return mock_generate_result()
 
 
 def _patch_settings(monkeypatch, settings):
@@ -67,7 +53,7 @@ def test_stl_viewer_page_and_artifact_resolution(settings, monkeypatch):
 
     stl_path = _query_stl_path("EXP001", "RUN001", "Q001")
     assert stl_path == Path(settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001" / "model.stl")
-    assert stl_path.read_bytes().startswith(b"solid mock")
+    assert len(stl_path.read_bytes()) > 0
 
 
 def test_stl_path_rejects_missing_run(settings, monkeypatch):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cadybara_benchmark.api_client import GenerateResult
+from tests.conftest import BOX_CODE, mock_generate_result
 from cadybara_benchmark.services.direct import submit_query
 
 
@@ -9,21 +9,7 @@ class FakeClient:
 
     def generate(self, prompt, parameters):
         self.parameters = parameters
-        return GenerateResult(
-            stl_bytes=b"solid direct\nendsolid direct\n",
-            generated_code="result = None",
-            raw_response={
-                "generated_code": "result = None",
-                "stl_base64": "...",
-                "validation": {"valid": True, "confidence": 1.0},
-                "response_mode": "json",
-            },
-            response_metadata={
-                "latency_ms": 10,
-                "response_mode": "json",
-                "validation": {"valid": True, "confidence": 1.0},
-            },
-        )
+        return mock_generate_result(export_format=parameters.get("export_format", "code"))
 
 
 def test_submit_query_without_experiment(settings):
@@ -37,6 +23,7 @@ def test_submit_query_without_experiment(settings):
 
     assert result["submission_id"].startswith("DIRECT-")
     assert client.parameters["model"] == "google/gemini-3-flash-preview"
+    assert client.parameters["export_format"] == "code"
     assert result["parameters"]["model"] == "google/gemini-3-flash-preview"
     assert (settings.workspace_dir / "generated" / "direct").exists()
     assert result["stl_path"].endswith("model.stl")

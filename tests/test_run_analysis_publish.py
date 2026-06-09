@@ -4,7 +4,7 @@ import json
 import threading
 import time
 
-from cadybara_benchmark.api_client import GenerateResult
+from tests.conftest import BOX_CODE, MOCK_STL_BYTES, mock_generate_result
 from cadybara_benchmark.publishing import publish_experiment
 from cadybara_benchmark.run_files import get_run, list_runs, next_run_id, summary_path
 from cadybara_benchmark.services.analysis import analyze_experiment
@@ -22,39 +22,7 @@ class FakeClient:
         if self.calls is None:
             self.calls = []
         self.calls.append({"prompt": prompt, "parameters": parameters})
-        return GenerateResult(
-            stl_bytes=b"solid mock\nendsolid mock\n",
-            generated_code="import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)",
-            raw_response={
-                "generated_code": "import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)",
-                "stl_base64": "...",
-                "validation": {
-                    "valid": True,
-                    "confidence": 0.9,
-                    "issues": [],
-                    "brief_reason": "Mock validation passed.",
-                    "attempt_count": 1,
-                    "max_attempts": 3,
-                },
-                "response_mode": "json",
-                "metrics": {
-                    "credit_use": 100,
-                    "latency": 1.25,
-                    "steps": 4,
-                    "tool_calls": 9,
-                },
-            },
-            response_metadata={
-                "latency_ms": 100,
-                "response_mode": "json",
-                "validation": {
-                    "valid": True,
-                    "confidence": 0.9,
-                    "attempt_count": 1,
-                    "max_attempts": 3,
-                },
-            },
-        )
+        return mock_generate_result()
 
 
 def test_run_analyze_and_publish(settings):
@@ -173,12 +141,7 @@ class ConcurrentTrackingClient:
             self.calls.append({"prompt": prompt, "parameters": parameters})
         try:
             time.sleep(self.delay_seconds)
-            return GenerateResult(
-                stl_bytes=b"solid mock\nendsolid mock\n",
-                generated_code="import cadquery as cq",
-                raw_response={"metrics": {"latency": 1.0}},
-                response_metadata={"latency_ms": 100, "response_mode": "json"},
-            )
+            return mock_generate_result()
         finally:
             with self.lock:
                 self.active -= 1
@@ -218,3 +181,133 @@ def test_next_run_id_increments(settings):
     summary_path("EXP001", "RUN001", settings).parent.mkdir(parents=True)
     summary_path("EXP001", "RUN001", settings).write_text("{}")
     assert next_run_id("EXP001", settings) == "RUN002"
+
+
+class ReturnFormatClient:
+    def __init__(self, export_format: str):
+        self.export_format = export_format
+        self.calls: list[dict] = []
+
+    def generate(self, prompt, parameters):
+        self.calls.append({"prompt": prompt, "parameters": parameters})
+        if self.export_format == "step":
+            return mock_generate_result(
+                export_format="step",
+                generated_code=BOX_CODE,
+                model_bytes=_step_bytes(),
+            )
+        if self.export_format == "code":
+            return mock_generate_result(export_format="code", generated_code=BOX_CODE)
+        return mock_generate_result(export_format="stl", model_bytes=MOCK_STL_BYTES)
+
+
+def test_run_experiment_uses_return_format_code(settings):
+    create_experiment(
+        "Code Return Format",
+        setup={
+            "model": "default",
+            "response_mode": "json",
+            "return_format": "code",
+            "linear_deflection": 0.1,
+            "angular_deflection": 0.1,
+        },
+        settings=settings,
+    )
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    client = ReturnFormatClient("code")
+    summary = run_experiment("EXP001", client=client, settings=settings)
+
+    assert summary["completed"] == 1
+    assert client.calls[0]["parameters"]["export_format"] == "code"
+    artifact_dir = settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001"
+    assert (artifact_dir / "model.stl").exists()
+    assert (artifact_dir / "generated_code.py").exists()
+    assert not (artifact_dir / "model.step").exists()
+
+
+def test_run_experiment_uses_return_format_step(settings):
+    create_experiment(
+        "Step Return Format",
+        setup={
+            "model": "default",
+            "response_mode": "json",
+            "return_format": "step",
+            "linear_deflection": 0.1,
+            "angular_deflection": 0.1,
+        },
+        settings=settings,
+    )
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    client = ReturnFormatClient("step")
+    summary = run_experiment(
+        "EXP001", client=client, settings=settings, output_format="step"
+    )
+
+    assert summary["completed"] == 1
+    assert client.calls[0]["parameters"]["export_format"] == "step"
+    artifact_dir = settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001"
+    assert (artifact_dir / "model.step").exists()
+    assert (artifact_dir / "model.stl").exists()
+
+
+def test_run_experiment_output_format_stl_skips_local_step(settings):
+    create_experiment(
+        "Step API Only",
+        setup={
+            "model": "default",
+            "response_mode": "json",
+            "return_format": "step",
+            "linear_deflection": 0.1,
+            "angular_deflection": 0.1,
+        },
+        settings=settings,
+    )
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    client = ReturnFormatClient("step")
+    run_experiment("EXP001", client=client, settings=settings, output_format="stl")
+
+    artifact_dir = settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001"
+    assert (artifact_dir / "model.stl").exists()
+    assert not (artifact_dir / "model.step").exists()
+
+
+def test_run_experiment_output_format_step_renders_from_code(settings):
+    create_experiment(
+        "Code API With Step Output",
+        setup={
+            "model": "default",
+            "response_mode": "json",
+            "return_format": "code",
+            "linear_deflection": 0.1,
+            "angular_deflection": 0.1,
+        },
+        settings=settings,
+    )
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    client = ReturnFormatClient("code")
+    run_experiment("EXP001", client=client, settings=settings, output_format="step")
+
+    artifact_dir = settings.workspace_dir / "artifacts" / "EXP001" / "RUN001" / "Q001"
+    assert (artifact_dir / "model.stl").exists()
+    assert (artifact_dir / "model.step").exists()
+
+
+def _step_bytes() -> bytes:
+    import tempfile
+    from pathlib import Path
+
+    import cadquery as cq
+    from cadquery import exporters
+
+    workplane = cq.Workplane("XY").box(2, 2, 2)
+    with tempfile.NamedTemporaryFile(suffix=".step", delete=False) as handle:
+        step_path = Path(handle.name)
+    try:
+        exporters.export(workplane, str(step_path), exportType=exporters.ExportTypes.STEP)
+        return step_path.read_bytes()
+    finally:
+        step_path.unlink(missing_ok=True)

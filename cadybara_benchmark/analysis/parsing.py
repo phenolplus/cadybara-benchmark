@@ -15,6 +15,7 @@ def parse_output(raw_output: str | dict[str, Any] | None) -> dict[str, Any]:
     validation = raw_output.get("validation") or {}
     return {
         "response_mode": raw_output.get("response_mode"),
+        "export_format": raw_output.get("export_format"),
         "has_generated_code": bool(raw_output.get("generated_code")),
         "validation": validation,
     }

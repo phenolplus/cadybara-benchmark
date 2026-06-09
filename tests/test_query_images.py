@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 
-from cadybara_benchmark.api_client import GenerateResult
+from tests.conftest import mock_generate_result
 from cadybara_benchmark.experiment_files import load_experiment
 from cadybara_benchmark.query_images import load_api_images, resolve_query_image_path
 from cadybara_benchmark.services.experiments import create_experiment
@@ -24,16 +24,7 @@ class FakeClient:
 
     def generate(self, prompt, parameters):
         self.calls.append({"prompt": prompt, "parameters": parameters})
-        return GenerateResult(
-            stl_bytes=b"solid mock\nendsolid mock\n",
-            generated_code="import cadquery as cq\nresult = cq.Workplane('XY').box(1, 1, 1)",
-            raw_response={
-                "generated_code": "import cadquery as cq",
-                "stl_base64": "...",
-                "metrics": {"credit_use": 1, "latency": 1.0, "steps": 1, "tool_calls": 1},
-            },
-            response_metadata={"latency_ms": 100, "response_mode": "json"},
-        )
+        return mock_generate_result()
 
 
 def _patch_settings(monkeypatch, settings):

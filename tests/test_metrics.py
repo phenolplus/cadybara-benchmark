@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from cadybara_benchmark.metrics import average_client_latency_ms, client_latency_ms
+from cadybara_benchmark.metrics import (
+    average_client_latency_ms,
+    client_latency_ms,
+    run_eta_ms,
+    total_client_latency_ms,
+)
 
 
 def test_client_latency_ms_from_response_metadata():
@@ -36,3 +41,35 @@ def test_average_client_latency_ms():
 def test_average_client_latency_ms_empty():
     assert average_client_latency_ms([]) is None
     assert average_client_latency_ms([{}]) is None
+
+
+def test_total_client_latency_ms():
+    queries = [
+        {"response_metadata": {"latency_ms": 100}},
+        {"response_metadata": {"latency_ms": 250}},
+        {},
+    ]
+    assert total_client_latency_ms(queries) == 350
+
+
+def test_total_client_latency_ms_empty():
+    assert total_client_latency_ms([]) is None
+    assert total_client_latency_ms([{}]) is None
+
+
+def test_run_eta_ms():
+    queries = [
+        {"status": "completed", "response_metadata": {"latency_ms": 100}},
+        {"status": "failed", "error": {"latency_ms": 200}},
+        {"status": "running"},
+        {"status": "pending"},
+    ]
+    assert run_eta_ms(queries) == 300
+
+
+def test_run_eta_ms_without_finished_queries():
+    queries = [
+        {"status": "running"},
+        {"status": "pending"},
+    ]
+    assert run_eta_ms(queries) is None

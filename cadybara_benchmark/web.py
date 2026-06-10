@@ -13,7 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, model_validator
 
 from cadybara_benchmark.config import REPO_ROOT, get_settings
-from cadybara_benchmark.metrics import average_client_latency_ms, client_latency_ms
+from cadybara_benchmark.metrics import (
+    client_latency_ms,
+    run_eta_ms,
+    total_client_latency_ms,
+)
 from cadybara_benchmark.publishing import publish_experiment
 from cadybara_benchmark.services.experiments import (
     create_experiment,
@@ -339,7 +343,8 @@ def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
         "completed_count": completed,
         "failed_count": failed,
         "average_score": average_score,
-        "average_client_latency_ms": average_client_latency_ms(queries),
+        "total_client_latency_ms": total_client_latency_ms(queries),
+        "eta_ms": run_eta_ms(queries) if run.get("status") == "running" else None,
         "can_resume": has_resumable_queries(run),
     }
 
@@ -373,7 +378,8 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
         **run,
         "experiment_id": experiment_id,
         "queries": queries,
-        "average_client_latency_ms": average_client_latency_ms(queries),
+        "total_client_latency_ms": total_client_latency_ms(queries),
+        "eta_ms": run_eta_ms(queries) if run.get("status") == "running" else None,
     }
 
 

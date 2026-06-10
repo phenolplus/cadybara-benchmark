@@ -101,10 +101,11 @@ def test_compare_page_and_run_payload(settings, monkeypatch):
         "tool_calls": 9,
     }
     assert payload["queries"][0]["client_latency_ms"] == 100
-    assert payload["average_client_latency_ms"] == 100
+    assert payload["total_client_latency_ms"] == 100
+    assert payload["eta_ms"] is None
 
 
-def test_with_run_stats_includes_client_latency(settings, monkeypatch):
+def test_with_run_stats_includes_run_time(settings, monkeypatch):
     _patch_settings(monkeypatch, settings)
 
     create_experiment("Latency Test", settings=settings)
@@ -112,7 +113,8 @@ def test_with_run_stats_includes_client_latency(settings, monkeypatch):
     run_experiment("EXP001", client=FakeClient(), settings=settings)
 
     run = _with_run_stats(get_run("EXP001", "RUN001", settings))
-    assert run["average_client_latency_ms"] == 100
+    assert run["total_client_latency_ms"] == 100
+    assert run["eta_ms"] is None
     assert run["queries"][0]["client_latency_ms"] == 100
 
 
@@ -182,11 +184,12 @@ def test_compare_page_supports_in_progress_runs():
     assert "fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}`)" in script
 
 
-def test_app_renders_client_latency():
+def test_app_renders_run_time():
     script = (STATIC_DIR / "app.js").read_text()
 
-    assert "Avg client latency" in script
-    assert "client latency" in script
+    assert ">Time</th>" in script
+    assert "formatRunTime" in script
+    assert "getRunEtaMs" in script
     assert "getClientLatencyMs" in script
 
 

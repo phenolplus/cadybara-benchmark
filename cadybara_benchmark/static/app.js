@@ -239,7 +239,7 @@ function runsTable(runs, experimentId) {
   return `
     <div class="table-responsive runs-table-wrap">
       <table class="table runs-table">
-        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg client latency</th><th>Started</th><th class="run-actions-col">Actions</th></tr></thead>
+        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Time</th><th>Started</th><th class="run-actions-col">Actions</th></tr></thead>
         <tbody>
           ${runs.map((run) => runRows(run, experimentId)).join("")}
         </tbody>
@@ -260,7 +260,7 @@ function runRows(run, experimentId) {
       <td class="fw-semibold">${escapeHtml(runId)}</td>
       <td>${statusBadge(run.status)}</td>
       <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
-      <td class="text-body-secondary small">${formatClientLatency(run.average_client_latency_ms)}</td>
+      <td class="text-body-secondary small">${formatRunTime(run)}</td>
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
       <td class="run-actions-cell">
         <div class="run-actions">
@@ -609,7 +609,8 @@ function addOptimisticRun(experimentId) {
         query_count: queries.length,
         completed_count: 0,
         failed_count: 0,
-        average_client_latency_ms: null,
+        total_client_latency_ms: null,
+        eta_ms: null,
         summary: { completed: 0, failed: 0 },
       },
     ],
@@ -760,6 +761,8 @@ function enrichRun(run) {
     query_count: queries.length,
     completed_count: completedCount,
     failed_count: failedCount,
+    total_client_latency_ms: getRunTotalTimeMs(run),
+    eta_ms: run.status === "running" ? getRunEtaMs(run) : null,
   };
 }
 
@@ -960,8 +963,59 @@ function getClientLatencyMs(query) {
 }
 
 function formatClientLatency(latencyMs) {
-  if (latencyMs === null || latencyMs === undefined) return "—";
-  return `${latencyMs} ms`;
+  return formatDurationMs(latencyMs);
+}
+
+function isFinishedQuery(query) {
+  const status = query.status;
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function getRunTotalTimeMs(run) {
+  if (run.status === "running") return null;
+  const values = (run.queries || []).map(getClientLatencyMs).filter((value) => value !== null);
+  if (!values.length) return null;
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function getRunEtaMs(run) {
+  const queries = run.queries || [];
+  const latencies = queries
+    .filter(isFinishedQuery)
+    .map(getClientLatencyMs)
+    .filter((value) => value !== null);
+  const remaining = queries.filter(
+    (query) => query.status === "pending" || query.status === "running",
+  ).length;
+  if (!latencies.length || !remaining) return null;
+  const average = latencies.reduce((total, value) => total + value, 0) / latencies.length;
+  return Math.round(average * remaining);
+}
+
+function formatRunTime(run) {
+  if (run.status === "running") {
+    const eta = run.eta_ms ?? getRunEtaMs(run);
+    return eta !== null ? `ETA: ${formatDurationMs(eta)}` : "ETA: —";
+  }
+  const total = run.total_client_latency_ms ?? getRunTotalTimeMs(run);
+  return formatDurationMs(total);
+}
+
+function formatDurationMs(ms) {
+  if (ms === null || ms === undefined) return "—";
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) {
+    const seconds = ms / 1000;
+    return Number.isInteger(seconds) ? `${seconds} s` : `${seconds.toFixed(1)} s`;
+  }
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  if (minutes < 60) {
+    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
 function formatMetrics(metrics) {

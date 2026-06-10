@@ -342,6 +342,8 @@ def test_app_renders_stop_button_for_running_runs():
     assert "function stopRun" in script
     assert "/stop" in script
     assert "btn-outline-danger" in script
+    assert "data-run-action" in script
+    assert 'runActionButton("Stop", "stop"' in script
 
 
 def test_resume_run_completes_cancelled_queries(settings):
@@ -389,33 +391,178 @@ def test_resume_run_rejects_non_stopped_run(settings):
         raise AssertionError("Expected resume_run to reject a completed run")
 
 
-def test_resume_run_rejects_when_no_cancelled_queries(settings):
+def test_resume_run_rejects_when_no_resumable_queries(settings):
     create_experiment("Resume Test", settings=settings)
     add_query("EXP001", "Create a cube.", settings=settings)
     run_experiment("EXP001", client=FakeClient(), settings=settings)
 
     run = get_run("EXP001", "RUN001", settings)
     run["status"] = "stopped"
-    from cadybara_benchmark.run_files import save_run_summary
-
     save_run_summary(run, settings)
 
     try:
         resume_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
     except ValueError as exc:
-        assert "no cancelled queries" in str(exc)
+        assert "no resumable queries" in str(exc)
     else:
-        raise AssertionError("Expected resume_run to reject a run with no cancelled queries")
+        raise AssertionError("Expected resume_run to reject a run with no resumable queries")
 
 
 def test_app_renders_resume_button_for_stopped_runs():
     script = (STATIC_DIR / "app.js").read_text()
 
-    assert "function canResumeRun" in script
+    assert "function shouldShowResume" in script
     assert "function resumeRun" in script
     assert "/resume" in script
     assert 'query.status === "cancelled"' in script
+    assert 'query.status === "pending"' in script
+    assert "run.can_resume" in script
+    assert "data-run-action" in script
+    assert 'runActionButton("Resume", "resume"' in script
     assert "btn-outline-success" in script
+    assert "Resume cancelled queries" in script
+
+
+def test_with_run_stats_exposes_can_resume(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Resume Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "stopped",
+            "started_at": "2026-06-05T12:00:00Z",
+            "finished_at": "2026-06-05T12:05:00Z",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "Q001",
+                    "text": "Create a cube.",
+                    "model": "default",
+                    "images": [],
+                    "status": "pending",
+                    "error": {},
+                    "artifact_dir": "",
+                    "response_metadata": {},
+                    "score": None,
+                    "metrics": {},
+                }
+            ],
+            "summary": {"completed": 0, "failed": 0},
+        },
+        settings,
+    )
+
+    run = _with_run_stats(get_run("EXP001", "RUN001", settings))
+    assert run["can_resume"] is True
+
+
+def test_reconcile_finalizes_orphaned_completed_run(settings):
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "running",
+            "started_at": "2026-06-05T12:00:00Z",
+            "finished_at": "",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "Q001",
+                    "text": "Create a cube.",
+                    "model": "default",
+                    "images": [],
+                    "status": "completed",
+                    "error": {},
+                    "artifact_dir": "",
+                    "response_metadata": {},
+                    "score": None,
+                    "metrics": {},
+                }
+            ],
+            "summary": {"completed": 1, "failed": 0},
+        },
+        settings,
+    )
+
+    reconciled = reconcile_persisted_run_state(get_run("EXP001", "RUN001", settings), settings=settings)
+    assert reconciled["status"] == "completed"
+    assert reconciled["finished_at"]
+
+
+def test_reconcile_recovers_stopped_run_with_pending_queries_when_active_is_stale(settings):
+    from cadybara_benchmark.services.runs import _ActiveRun, _register_active_run, _unregister_active_run
+
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "stopped",
+            "started_at": "2026-06-05T12:00:00Z",
+            "finished_at": "2026-06-05T12:05:00Z",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "Q001",
+                    "text": "Create a cube.",
+                    "model": "default",
+                    "images": [],
+                    "status": "pending",
+                    "error": {},
+                    "artifact_dir": "",
+                    "response_metadata": {},
+                    "score": None,
+                    "metrics": {},
+                }
+            ],
+            "summary": {"completed": 0, "failed": 0},
+        },
+        settings,
+    )
+
+    stale_summary = {
+        "id": "RUN001",
+        "experiment_id": "EXP001",
+        "status": "running",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "",
+        "parameters": {},
+        "queries": [
+            {
+                "query_id": "Q001",
+                "text": "Create a cube.",
+                "model": "default",
+                "images": [],
+                "status": "running",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            }
+        ],
+        "summary": {"completed": 0, "failed": 0},
+    }
+    _register_active_run(
+        "RUN001",
+        _ActiveRun(
+            experiment_id="EXP001",
+            cancel_event=threading.Event(),
+            lock=threading.Lock(),
+            run_summary=stale_summary,
+        ),
+    )
+
+    reconciled = reconcile_persisted_run_state(get_run("EXP001", "RUN001", settings), settings=settings)
+    assert reconciled["status"] == "stopped"
+    assert reconciled["queries"][0]["status"] == "cancelled"
+    _unregister_active_run("RUN001")
 
 
 def test_reconcile_persisted_run_marks_orphaned_running_as_stopped(settings):

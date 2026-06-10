@@ -24,6 +24,7 @@ from cadybara_benchmark.query_images import resolve_query_image_path
 from cadybara_benchmark.services.queries import add_query, list_queries
 from cadybara_benchmark.services.runs import (
     get_reconciled_run,
+    has_resumable_queries,
     list_reconciled_runs,
     list_results_for_experiment,
     list_runs,
@@ -339,6 +340,7 @@ def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
         "failed_count": failed,
         "average_score": average_score,
         "average_client_latency_ms": average_client_latency_ms(queries),
+        "can_resume": has_resumable_queries(run),
     }
 
 

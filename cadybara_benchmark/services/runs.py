@@ -34,6 +34,8 @@ class _ActiveRun:
 
 _active_runs: dict[str, _ActiveRun] = {}
 _active_runs_lock = threading.Lock()
+_RESUMABLE_QUERY_STATUSES = frozenset({"cancelled", "pending", "running"})
+_INFLIGHT_QUERY_STATUSES = frozenset({"pending", "running"})
 
 
 def list_runs(experiment_id: str, settings: Settings | None = None) -> list[dict[str, Any]]:
@@ -68,20 +70,35 @@ def reconcile_persisted_run_state(
     if active is not None:
         with active.lock:
             in_memory = dict(active.run_summary)
-        if _run_is_incomplete(in_memory) and in_memory.get("status") == "running":
+        live = (
+            _run_is_incomplete(in_memory)
+            and in_memory.get("status") == "running"
+            and run_summary.get("status") == "running"
+        )
+        if live:
             return run_summary
         _unregister_active_run(run_id)
     if not _run_is_incomplete(run_summary):
         return run_summary
 
     experiment_id = run_summary.get("experiment_id")
-    _mark_run_stopped(run_summary)
+    queries = run_summary.get("queries", [])
+    has_inflight_queries = any(
+        query.get("status") in _INFLIGHT_QUERY_STATUSES for query in queries
+    )
+    if has_inflight_queries:
+        _mark_run_stopped(run_summary)
+    elif run_summary.get("status") == "running":
+        failed = any(query.get("status") == "failed" for query in queries)
+        run_summary["status"] = "completed" if not failed else "completed_with_errors"
+        if not run_summary.get("finished_at"):
+            run_summary["finished_at"] = utc_now()
     _sync_run_summary_counts(run_summary)
     save_run_summary(run_summary, settings)
     if experiment_id:
         experiment = get_experiment(experiment_id, settings)
         if experiment.get("status") == "running":
-            update_experiment_status(experiment_id, "stopped", settings)
+            update_experiment_status(experiment_id, run_summary["status"], settings)
     return run_summary
 
 
@@ -109,19 +126,15 @@ def resume_run(
     if _get_active_run(run_id) is not None:
         raise ValueError(f"Run {run_id} is already running.")
 
-    run_summary = get_run_by_id(run_id, settings)
+    run_summary = reconcile_persisted_run_state(get_run_by_id(run_id, settings), settings)
     if run_summary.get("experiment_id") != experiment_id:
         raise ValueError(f"Run not found: {run_id}")
     if run_summary["status"] != "stopped":
         raise ValueError(f"Run {run_id} is not stopped.")
 
-    cancelled_indices = [
-        index
-        for index, query_entry in enumerate(run_summary.get("queries", []))
-        if query_entry.get("status") == "cancelled"
-    ]
-    if not cancelled_indices:
-        raise ValueError(f"Run {run_id} has no cancelled queries to resume.")
+    resumable_indices = _resumable_query_indices(run_summary)
+    if not resumable_indices:
+        raise ValueError(f"Run {run_id} has no resumable queries.")
 
     experiment = get_experiment(experiment_id, settings)
     experiment_queries = {query["id"]: query for query in experiment.get("queries", [])}
@@ -158,7 +171,7 @@ def resume_run(
         )
 
     work_items: list[tuple[int, dict[str, Any]]] = []
-    for index in cancelled_indices:
+    for index in resumable_indices:
         query_entry = run_summary["queries"][index]
         experiment_query = experiment_queries.get(query_entry["query_id"])
         if experiment_query is None:
@@ -526,9 +539,21 @@ def _run_is_incomplete(run_summary: dict[str, Any]) -> bool:
     if run_summary.get("status") == "running":
         return True
     return any(
-        query.get("status") in {"pending", "running"}
+        query.get("status") in _INFLIGHT_QUERY_STATUSES
         for query in run_summary.get("queries", [])
     )
+
+
+def _resumable_query_indices(run_summary: dict[str, Any]) -> list[int]:
+    return [
+        index
+        for index, query_entry in enumerate(run_summary.get("queries", []))
+        if query_entry.get("status") in _RESUMABLE_QUERY_STATUSES
+    ]
+
+
+def has_resumable_queries(run_summary: dict[str, Any]) -> bool:
+    return run_summary.get("status") == "stopped" and bool(_resumable_query_indices(run_summary))
 
 
 def _mark_run_stopped(run_summary: dict[str, Any]) -> None:

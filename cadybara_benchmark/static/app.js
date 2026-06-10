@@ -11,9 +11,11 @@ const state = {
 
 const savedTheme = localStorage.getItem("theme") || "light";
 document.documentElement.dataset.bsTheme = savedTheme;
-themeSwitch.checked = savedTheme === "dark";
+if (themeSwitch) {
+  themeSwitch.checked = savedTheme === "dark";
+}
 
-themeSwitch.addEventListener("change", () => {
+themeSwitch?.addEventListener("change", () => {
   const theme = themeSwitch.checked ? "dark" : "light";
   document.documentElement.dataset.bsTheme = theme;
   localStorage.setItem("theme", theme);
@@ -136,7 +138,7 @@ function renderExperimentPage(experiment, options = {}) {
             <button class="btn btn-outline-primary" id="compareSelectedRuns" disabled>Compare runs</button>
           </div>
         ` : ""}
-        <section class="panel overflow-hidden">
+        <section class="panel runs-panel">
           <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
           ${experiment.runs.length ? runsTable(experiment.runs, experiment.id) : `<div class="empty-state m-3">No runs recorded.</div>`}
         </section>
@@ -223,11 +225,23 @@ function queriesTable(queries) {
   `;
 }
 
+function shouldShowResume(run) {
+  if (run.can_resume === true) return true;
+  if (run.status !== "stopped") return false;
+  return (run.queries || []).some((query) =>
+    query.status === "cancelled" || query.status === "pending" || query.status === "running",
+  );
+}
+
+function runActionButton(label, action, runId, className) {
+  return `<button type="button" class="btn btn-sm ${className}" data-run-action="${escapeAttr(action)}" data-run-id="${escapeAttr(runId)}">${escapeHtml(label)}</button>`;
+}
+
 function runsTable(runs, experimentId) {
   return `
-    <div class="table-responsive">
+    <div class="table-responsive runs-table-wrap">
       <table class="table runs-table">
-        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg client latency</th><th>Started</th><th></th></tr></thead>
+        <thead><tr><th></th><th class="run-select-cell">Select</th><th>ID</th><th>Status</th><th>Queries</th><th>Avg client latency</th><th>Started</th><th class="run-actions-col">Actions</th></tr></thead>
         <tbody>
           ${runs.map((run) => runRows(run, experimentId)).join("")}
         </tbody>
@@ -250,15 +264,22 @@ function runRows(run, experimentId) {
       <td>${run.completed_count ?? 0}/${run.query_count ?? 0}</td>
       <td class="text-body-secondary small">${formatClientLatency(run.average_client_latency_ms)}</td>
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
-      <td class="text-nowrap">
-        ${run.status === "running" ? `<button class="btn btn-sm btn-outline-danger" onclick="stopRun('${escapeAttr(runId)}')">Stop</button>` : ""}
-        ${canResumeRun(run) ? `<button class="btn btn-sm btn-outline-success" onclick="resumeRun('${escapeAttr(runId)}')">Resume</button>` : ""}
-        <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
-        <button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button>
+      <td class="run-actions-cell">
+        <div class="run-actions">
+          ${run.status === "running" ? runActionButton("Stop", "stop", runId, "btn-outline-danger") : ""}
+          ${shouldShowResume(run) ? runActionButton("Resume", "resume", runId, "btn-outline-success") : ""}
+          <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
+          ${runActionButton("Publish", "publish", runId, "btn-outline-primary")}
+        </div>
       </td>
     </tr>
     <tr class="run-detail-row d-none" id="run-detail-${escapeAttr(runId)}" data-run-id="${escapeAttr(runId)}">
       <td colspan="8">
+        ${shouldShowResume(run) ? `
+          <div class="run-detail-toolbar">
+            ${runActionButton("Resume cancelled queries", "resume", runId, "btn-outline-success")}
+          </div>
+        ` : ""}
         ${queries.length ? runQueriesTable(queries, experimentId, runId) : `<div class="text-body-secondary small py-2">No query results.</div>`}
       </td>
     </tr>
@@ -301,6 +322,15 @@ function bindRunsTable() {
   const compareButton = document.querySelector("#compareSelectedRuns");
 
   table.addEventListener("click", (event) => {
+    const action = event.target.closest("[data-run-action]");
+    if (action) {
+      event.stopPropagation();
+      const runId = action.dataset.runId;
+      if (action.dataset.runAction === "stop") stopRun(runId);
+      if (action.dataset.runAction === "resume") resumeRun(runId);
+      if (action.dataset.runAction === "publish") publishRun(runId);
+      return;
+    }
     if (event.target.closest("button, a, input")) return;
     const row = event.target.closest(".run-row");
     if (!row) return;
@@ -733,10 +763,6 @@ function enrichRun(run) {
     completed_count: completedCount,
     failed_count: failedCount,
   };
-}
-
-function canResumeRun(run) {
-  return run.status === "stopped" && (run.queries || []).some((query) => query.status === "cancelled");
 }
 
 function markRunAsRunning(runId) {

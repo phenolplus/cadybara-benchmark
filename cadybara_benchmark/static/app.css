@@ -155,6 +155,29 @@ body {
   color: var(--bs-secondary-color);
 }
 
+.runs-panel {
+  overflow: visible;
+}
+
+.runs-table-wrap {
+  overflow-x: auto;
+}
+
+.run-actions-col {
+  min-width: 18rem;
+}
+
+.run-actions-cell {
+  min-width: 18rem;
+}
+
+.run-actions,
+.run-detail-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+}
+
 .run-row {
   cursor: pointer;
 }

@@ -123,6 +123,64 @@ def test_compare_renders_client_latency():
     assert '<div class="label">Client latency</div>' in script
 
 
+def test_compare_builds_blocks_from_experiment_queries(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("In Progress Compare", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", settings=settings)
+
+    run_summary = {
+        "id": "RUN001",
+        "experiment_id": "EXP001",
+        "status": "running",
+        "started_at": "2026-01-01T00:00:00Z",
+        "finished_at": "",
+        "parameters": {},
+        "queries": [
+            {
+                "query_id": "Q001",
+                "text": "Create a cube.",
+                "model": "default",
+                "images": [],
+                "status": "pending",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            },
+            {
+                "query_id": "Q002",
+                "text": "Create a sphere.",
+                "model": "default",
+                "images": [],
+                "status": "running",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            },
+        ],
+        "summary": {"completed": 0, "failed": 0},
+    }
+    save_run_summary(run_summary, settings)
+
+    payload = _run_payload("EXP001", "RUN001")
+    assert len(payload["queries"]) == 2
+    assert {query["query_id"] for query in payload["queries"]} == {"Q001", "Q002"}
+
+
+def test_compare_page_supports_in_progress_runs():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert "function buildCompareItems" in script
+    assert "function autoMinimizeInProgressBlocks" in script
+    assert 'query.status === "pending" || query.status === "running"' in script
+    assert "fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}`)" in script
+
+
 def test_app_renders_client_latency():
     script = (STATIC_DIR / "app.js").read_text()
 

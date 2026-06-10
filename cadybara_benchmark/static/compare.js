@@ -41,17 +41,11 @@ if (!experimentId || !runIds.length) {
 async function initCompare() {
   try {
     const uniqueRunIds = Array.from(new Set(runIds));
-    const runs = await Promise.all(
-      uniqueRunIds.map((runId) => fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}`)),
-    );
-    const compareItems = runs.flatMap((run, runIndex) =>
-      (run.queries || []).map((query) => ({
-        query,
-        run,
-        runIndex,
-        color: runColor(runIndex),
-      })),
-    );
+    const [experiment, ...runs] = await Promise.all([
+      fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}`),
+      ...uniqueRunIds.map((runId) => fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}`)),
+    ]);
+    const compareItems = buildCompareItems(runs, experiment);
     compareMeta.textContent = `${experimentId} · ${runs.length} run${runs.length === 1 ? "" : "s"} · ${compareItems.length} quer${compareItems.length === 1 ? "y" : "ies"}`;
 
     if (!compareItems.length) {
@@ -73,6 +67,7 @@ async function initCompare() {
     setupViewportResize(viewports);
     setupSyncedControls(viewports);
     setupBlockInteractions(blocks, compareGrid);
+    autoMinimizeInProgressBlocks(blocks, compareGrid);
     fitAllCameras(viewports);
     animate(viewports);
     showStatus("Drag a block handle to reorder. Drag a model viewport to rotate all models together.");
@@ -161,6 +156,45 @@ function createBlockShell(item) {
   return { element: block, host: stage };
 }
 
+function buildCompareItems(runs, experiment) {
+  const experimentQueries = experiment?.queries || [];
+  return runs.flatMap((run, runIndex) => {
+    const runQueriesById = new Map(
+      (run.queries || []).map((query) => [queryId(query), query]),
+    );
+    const queries = experimentQueries.length
+      ? experimentQueries.map((experimentQuery) => {
+          const runQuery = runQueriesById.get(experimentQuery.id);
+          if (runQuery) return runQuery;
+          return {
+            query_id: experimentQuery.id,
+            text: experimentQuery.text,
+            model: experimentQuery.model,
+            images: experimentQuery.images || [],
+            status: "pending",
+            error: {},
+            response_metadata: {},
+            metrics: {},
+          };
+        })
+      : run.queries || [];
+    return queries.map((query) => ({
+      query,
+      run,
+      runIndex,
+      color: runColor(runIndex),
+    }));
+  });
+}
+
+function queryId(query) {
+  return query.query_id || query.id || "";
+}
+
+function isInProgressQuery(query) {
+  return query.status === "pending" || query.status === "running";
+}
+
 function isDnfQuery(query) {
   return query.status !== "completed";
 }
@@ -221,6 +255,14 @@ function setupBlockInteractions(blocks, grid) {
   blocks.forEach(({ element }) => {
     setupDragReorder(element, grid);
     setupMinimize(element, grid);
+  });
+}
+
+function autoMinimizeInProgressBlocks(blocks, grid) {
+  blocks.forEach(({ element, item }) => {
+    if (isInProgressQuery(item.query)) {
+      setBlockExpanded(element, grid, false);
+    }
   });
 }
 
@@ -324,32 +366,34 @@ function insertBlockRelativeToTarget(draggedBlock, targetBlock, clientY) {
 function setupMinimize(block, grid) {
   const minimizeButton = block.querySelector(".compare-block-minimize");
   const title = block.querySelector(".compare-block-title");
-  const icon = minimizeButton?.querySelector(".compare-block-minimize-icon");
-  if (!minimizeButton || !icon) return;
-
-  const setExpanded = (expanded) => {
-    block.classList.toggle("is-minimized", !expanded);
-    minimizeButton.setAttribute("aria-expanded", String(expanded));
-    minimizeButton.setAttribute("aria-label", expanded ? "Minimize block" : "Expand block");
-    icon.textContent = expanded ? "−" : "+";
-  };
+  if (!minimizeButton) return;
 
   minimizeButton.addEventListener("click", () => {
-    const willMinimize = !block.classList.contains("is-minimized");
-    if (willMinimize) {
-      setExpanded(false);
-      getOrCreateMinimizedStack(grid).appendChild(block);
-    } else {
-      setExpanded(true);
-      restoreExpandedBlock(block, grid);
-    }
+    setBlockExpanded(block, grid, block.classList.contains("is-minimized"));
   });
 
   title?.addEventListener("click", () => {
     if (!block.classList.contains("is-minimized")) return;
-    setExpanded(true);
-    restoreExpandedBlock(block, grid);
+    setBlockExpanded(block, grid, true);
   });
+}
+
+function setBlockExpanded(block, grid, expanded) {
+  const minimizeButton = block.querySelector(".compare-block-minimize");
+  const icon = minimizeButton?.querySelector(".compare-block-minimize-icon");
+  block.classList.toggle("is-minimized", !expanded);
+  if (minimizeButton) {
+    minimizeButton.setAttribute("aria-expanded", String(expanded));
+    minimizeButton.setAttribute("aria-label", expanded ? "Minimize block" : "Expand block");
+  }
+  if (icon) {
+    icon.textContent = expanded ? "−" : "+";
+  }
+  if (expanded) {
+    restoreExpandedBlock(block, grid);
+  } else {
+    getOrCreateMinimizedStack(grid).appendChild(block);
+  }
 }
 
 function getOrCreateMinimizedStack(grid) {

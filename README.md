@@ -99,6 +99,36 @@ cadybara-benchmark add-query EXP001 \
   --model "gpt-5.5"
 ```
 
+Generate an experiment from `cadgenbench-data`:
+
+```bash
+import-cadgenbench --series both
+```
+
+For 100-series folders, query text and attached images come from
+`description.yaml`; every file listed under `input_files` is attached to that
+query line. Generated experiments reference the source image paths directly.
+
+Import only the 100-series, 200-series, or specific folders:
+
+```bash
+import-cadgenbench --series 100
+import-cadgenbench --series 200 --folder 201 --folder 229
+```
+
+Override experiment setup defaults when generating the experiment:
+
+```bash
+import-cadgenbench \
+  --series 100 \
+  --folder 104 \
+  --model "gpt-5.5" \
+  --response-mode json \
+  --return-format code \
+  --linear-deflection 0.1 \
+  --angular-deflection 0.1
+```
+
 Inspect the experiment:
 
 ```bash

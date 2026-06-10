@@ -65,8 +65,8 @@ def create_cadgenbench_experiment(
         settings=settings,
     )
     experiment["queries"] = [
-        _stored_query(index, query, category)
-        for index, query in enumerate(queries, start=1)
+        _stored_query(query, category)
+        for query in queries
     ]
     experiment["updated_at"] = utc_now()
     save_experiment(experiment, settings)
@@ -250,13 +250,11 @@ def _build_setup(
 
 
 def _stored_query(
-    index: int,
     query: CadGenBenchQuery,
     category: str,
 ) -> dict[str, object]:
-    query_id = f"Q{index:03d}"
     return {
-        "id": query_id,
+        "id": str(query.folder_id),
         "text": query.text,
         "model": "",
         "category": category or f"cadgenbench-{query.series}",

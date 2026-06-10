@@ -105,6 +105,7 @@ def test_cli_imports_selected_folders_into_one_experiment(tmp_path: Path, monkey
         "linear_deflection": 0.2,
         "angular_deflection": 0.3,
     }
+    assert [query["id"] for query in experiment["queries"]] == ["134", "201"]
     assert [query["metadata"]["folder_id"] for query in experiment["queries"]] == [134, 201]
     assert len(experiment["queries"][0]["images"]) == 2
     assert len(experiment["queries"][1]["images"]) == 4

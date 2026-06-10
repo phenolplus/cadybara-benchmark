@@ -129,6 +129,24 @@ import-cadgenbench \
   --angular-deflection 0.1
 ```
 
+Export a completed run into the CADGenBench submission package layout:
+
+```bash
+export-cadgenbench EXP005 RUN001 ./cadgenbench-submission \
+  --series 100 \
+  --submitter-name "Your Name" \
+  --submission-name "Gemini Flash 100 Series" \
+  --agent-url "https://example.com/agent" \
+  --notes "Generated with cadybara-benchmark." \
+  --render-step
+```
+
+The package folder contains top-level `meta.json` and one folder per sample.
+Each successful sample contains `output.step`; failed or missing samples are
+left as empty sample folders so CADGenBench scores them as missing. Use
+`--render-step` to render `output.step` from a run artifact's
+`generated_code.py` with CadQuery when available.
+
 Inspect the experiment:
 
 ```bash

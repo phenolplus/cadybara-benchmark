@@ -26,6 +26,7 @@ dev = [
 [project.scripts]
 cadybara-benchmark = "cadybara_benchmark.cli:app"
 import-cadgenbench = "cadybara_benchmark.cadgenbench_cli:app"
+export-cadgenbench = "cadybara_benchmark.cadgenbench_export_cli:main"
 
 [tool.setuptools.packages.find]
 include = ["cadybara_benchmark*"]

@@ -177,6 +177,7 @@ def test_compare_page_supports_in_progress_runs():
 
     assert "function buildCompareItems" in script
     assert "function autoMinimizeInProgressBlocks" in script
+    assert "function escapeAttr" in script
     assert 'query.status === "pending" || query.status === "running"' in script
     assert "fetchJson(`/api/experiments/${encodeURIComponent(experimentId)}`)" in script
 

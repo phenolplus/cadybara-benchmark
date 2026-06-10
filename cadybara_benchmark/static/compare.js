@@ -612,3 +612,7 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+function escapeAttr(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
+}

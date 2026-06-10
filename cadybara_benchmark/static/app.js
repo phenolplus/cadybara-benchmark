@@ -119,6 +119,15 @@ function renderExperimentPage(experiment, options = {}) {
       ${metric("Runs", experiment.runs.length)}
       ${metric("Results", experiment.results.length)}
     </div>
+    ${experiment.runs.length ? `
+      <div class="run-compare-toolbar">
+        <button class="btn btn-outline-primary" id="compareSelectedRuns" disabled>Compare runs</button>
+      </div>
+    ` : ""}
+    <section class="panel runs-panel mb-3">
+      <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
+      ${experiment.runs.length ? runsTable(experiment.runs, experiment.id) : `<div class="empty-state m-3">No runs recorded.</div>`}
+    </section>
     <div class="row g-3">
       <div class="col-xl-7">
         <section class="panel overflow-hidden">
@@ -130,17 +139,6 @@ function renderExperimentPage(experiment, options = {}) {
         <section class="panel">
           <div class="p-3 border-bottom"><h2 class="h5 mb-0">Setup</h2></div>
           <div class="p-3"><pre class="code-box mb-0">${escapeHtml(JSON.stringify(experiment.setup || {}, null, 2))}</pre></div>
-        </section>
-      </div>
-      <div class="col-12">
-        ${experiment.runs.length ? `
-          <div class="run-compare-toolbar">
-            <button class="btn btn-outline-primary" id="compareSelectedRuns" disabled>Compare runs</button>
-          </div>
-        ` : ""}
-        <section class="panel runs-panel">
-          <div class="p-3 border-bottom"><h2 class="h5 mb-0">Runs</h2></div>
-          ${experiment.runs.length ? runsTable(experiment.runs, experiment.id) : `<div class="empty-state m-3">No runs recorded.</div>`}
         </section>
       </div>
     </div>

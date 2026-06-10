@@ -7,7 +7,13 @@ from tests.conftest import mock_generate_result
 from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.experiments import create_experiment, get_experiment
 from cadybara_benchmark.services.queries import add_query
-from cadybara_benchmark.services.runs import resume_run, run_experiment, stop_run
+from cadybara_benchmark.run_files import save_run_summary
+from cadybara_benchmark.services.runs import (
+    reconcile_persisted_run_state,
+    resume_run,
+    run_experiment,
+    stop_run,
+)
 from cadybara_benchmark.web import (
     STATIC_DIR,
     _query_stl_path,
@@ -351,6 +357,141 @@ def test_app_renders_resume_button_for_stopped_runs():
     assert "/resume" in script
     assert 'query.status === "cancelled"' in script
     assert "btn-outline-success" in script
+
+
+def test_reconcile_persisted_run_marks_orphaned_running_as_stopped(settings):
+    from cadybara_benchmark.experiment_files import save_experiment
+
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", settings=settings)
+
+    run = {
+        "id": "RUN001",
+        "experiment_id": "EXP001",
+        "status": "running",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "",
+        "parameters": {},
+        "queries": [
+            {
+                "query_id": "Q001",
+                "text": "Create a cube.",
+                "model": "default",
+                "images": [],
+                "status": "completed",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            },
+            {
+                "query_id": "Q002",
+                "text": "Create a sphere.",
+                "model": "default",
+                "images": [],
+                "status": "pending",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            },
+        ],
+        "summary": {"completed": 1, "failed": 0},
+    }
+    save_run_summary(run, settings)
+    experiment = get_experiment("EXP001", settings)
+    experiment["status"] = "running"
+    save_experiment(experiment, settings)
+
+    reconciled = reconcile_persisted_run_state(run, settings=settings)
+    assert reconciled["status"] == "stopped"
+    assert reconciled["finished_at"]
+    assert reconciled["queries"][0]["status"] == "completed"
+    assert reconciled["queries"][1]["status"] == "cancelled"
+    assert reconciled["summary"] == {"completed": 1, "failed": 0}
+
+    persisted = get_run("EXP001", "RUN001", settings)
+    assert persisted["status"] == "stopped"
+    assert get_experiment("EXP001", settings)["status"] == "stopped"
+
+
+def test_reconcile_persisted_run_leaves_active_run_untouched(settings):
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    client = BlockingClient()
+
+    def execute() -> None:
+        run_experiment("EXP001", client=client, settings=settings, concurrency=1)
+
+    thread = threading.Thread(target=execute)
+    thread.start()
+    assert client.started.wait(timeout=5)
+
+    run = get_run("EXP001", "RUN001", settings)
+    reconciled = reconcile_persisted_run_state(run, settings=settings)
+    assert reconciled["status"] == "running"
+
+    stop_run("EXP001", "RUN001", settings=settings)
+    client.release.set()
+    thread.join(timeout=5)
+
+
+def test_reconcile_persisted_run_noop_for_completed_run(settings):
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    run = get_run("EXP001", "RUN001", settings)
+    reconciled = reconcile_persisted_run_state(dict(run), settings=settings)
+    assert reconciled["status"] == "completed"
+    assert reconciled["queries"][0]["status"] == "completed"
+
+
+def test_run_payload_reconciles_orphaned_run(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+
+    run = {
+        "id": "RUN001",
+        "experiment_id": "EXP001",
+        "status": "running",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "",
+        "parameters": {},
+        "queries": [
+            {
+                "query_id": "Q001",
+                "text": "Create a cube.",
+                "model": "default",
+                "images": [],
+                "status": "running",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            }
+        ],
+        "summary": {"completed": 0, "failed": 0},
+    }
+    save_run_summary(run, settings)
+
+    payload = _run_payload("EXP001", "RUN001")
+    assert payload["status"] == "stopped"
+    assert payload["queries"][0]["status"] == "cancelled"
+
+
+def test_app_reconciles_run_when_expanding_row():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert "async function toggleRunRow" in script
+    assert "await refreshRunInState(state.current.id, runId);" in script
 
 
 def test_app_route_resets_modal_backdrop():

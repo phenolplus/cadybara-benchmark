@@ -14,6 +14,7 @@ from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
 from cadybara_benchmark.ids import next_run_id
 from cadybara_benchmark.json_utils import dumps_json, loads_json
 from cadybara_benchmark.run_files import (
+    get_run as load_run_summary,
     get_run_by_id,
     list_runs as list_run_summaries,
     run_dir,
@@ -37,6 +38,38 @@ _active_runs_lock = threading.Lock()
 
 def list_runs(experiment_id: str, settings: Settings | None = None) -> list[dict[str, Any]]:
     return list_run_summaries(experiment_id, settings)
+
+
+def get_reconciled_run(
+    experiment_id: str,
+    run_id: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    run_summary = load_run_summary(experiment_id, run_id, settings)
+    return reconcile_persisted_run_state(run_summary, settings)
+
+
+def reconcile_persisted_run_state(
+    run_summary: dict[str, Any],
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    run_id = run_summary["id"]
+    if _get_active_run(run_id) is not None:
+        return run_summary
+    if not _run_is_incomplete(run_summary):
+        return run_summary
+
+    experiment_id = run_summary.get("experiment_id")
+    _mark_run_stopped(run_summary)
+    _sync_run_summary_counts(run_summary)
+    save_run_summary(run_summary, settings)
+    if experiment_id:
+        experiment = get_experiment(experiment_id, settings)
+        if experiment.get("status") == "running":
+            update_experiment_status(experiment_id, "stopped", settings)
+    return run_summary
 
 
 def list_results_for_experiment(
@@ -474,6 +507,15 @@ def _unregister_active_run(run_id: str) -> None:
 def _get_active_run(run_id: str) -> _ActiveRun | None:
     with _active_runs_lock:
         return _active_runs.get(run_id)
+
+
+def _run_is_incomplete(run_summary: dict[str, Any]) -> bool:
+    if run_summary.get("status") == "running":
+        return True
+    return any(
+        query.get("status") in {"pending", "running"}
+        for query in run_summary.get("queries", [])
+    )
 
 
 def _mark_run_stopped(run_summary: dict[str, Any]) -> None:

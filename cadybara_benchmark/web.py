@@ -22,8 +22,8 @@ from cadybara_benchmark.services.experiments import (
 )
 from cadybara_benchmark.query_images import resolve_query_image_path
 from cadybara_benchmark.services.queries import add_query, list_queries
-from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.runs import (
+    get_reconciled_run,
     list_results_for_experiment,
     list_runs,
     resume_run,
@@ -355,7 +355,7 @@ def _stored_path(path: Path) -> str:
 
 
 def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
-    run = get_run(experiment_id, run_id)
+    run = get_reconciled_run(experiment_id, run_id)
     queries = []
     for query in run.get("queries", []):
         query = _with_query_api_fields(query)
@@ -375,7 +375,7 @@ def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
 
 
 def _run_query(experiment_id: str, run_id: str, query_id: str) -> dict[str, Any]:
-    run = get_run(experiment_id, run_id)
+    run = get_reconciled_run(experiment_id, run_id)
     query = _with_query_api_fields(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     return {
@@ -394,7 +394,7 @@ def _find_run_query(run: dict[str, Any], query_id: str) -> dict[str, Any]:
 
 
 def _query_stl_path(experiment_id: str, run_id: str, query_id: str) -> Path:
-    run = get_run(experiment_id, run_id)
+    run = get_reconciled_run(experiment_id, run_id)
     query = _with_query_api_fields(_find_run_query(run, query_id))
     stl_path = _resolve_query_stl_path(query)
     if stl_path is None:

@@ -346,15 +346,32 @@ function updateCompareRunsButton() {
   compareButton.textContent = count ? `Compare ${count} run${count === 1 ? "" : "s"}` : "Compare runs";
 }
 
-function toggleRunRow(runId) {
+async function toggleRunRow(runId) {
   const row = document.querySelector(`.run-row[data-run-id="${runId}"]`);
   const detail = document.querySelector(`.run-detail-row[data-run-id="${runId}"]`);
   if (!row || !detail) return;
 
   const expanded = row.getAttribute("aria-expanded") === "true";
-  row.setAttribute("aria-expanded", expanded ? "false" : "true");
-  row.classList.toggle("expanded", !expanded);
-  detail.classList.toggle("d-none", expanded);
+  if (expanded) {
+    row.setAttribute("aria-expanded", "false");
+    row.classList.remove("expanded");
+    detail.classList.add("d-none");
+    return;
+  }
+
+  if (state.current?.id) {
+    await refreshRunInState(state.current.id, runId);
+    const expandedRunIds = getExpandedRunIds();
+    if (!expandedRunIds.includes(runId)) {
+      expandedRunIds.push(runId);
+    }
+    renderExperimentPage(state.current, { expandedRunIds });
+    return;
+  }
+
+  row.setAttribute("aria-expanded", "true");
+  row.classList.add("expanded");
+  detail.classList.remove("d-none");
 }
 
 function publishedTable(items) {

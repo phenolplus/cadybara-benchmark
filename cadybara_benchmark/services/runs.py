@@ -126,9 +126,7 @@ def resume_run(
     if _get_active_run(run_id) is not None:
         raise ValueError(f"Run {run_id} is already running.")
 
-    run_summary = reconcile_persisted_run_state(get_run_by_id(run_id, settings), settings)
-    if run_summary.get("experiment_id") != experiment_id:
-        raise ValueError(f"Run not found: {run_id}")
+    run_summary = get_reconciled_run(experiment_id, run_id, settings)
     if run_summary["status"] != "stopped":
         raise ValueError(f"Run {run_id} is not stopped.")
 
@@ -228,9 +226,7 @@ def stop_run(
         update_experiment_status(experiment_id, "stopped", settings)
         return dict(active.run_summary)
 
-    run_summary = get_run_by_id(run_id, settings)
-    if run_summary.get("experiment_id") != experiment_id:
-        raise ValueError(f"Run not found: {run_id}")
+    run_summary = get_reconciled_run(experiment_id, run_id, settings)
     if run_summary["status"] != "running":
         raise ValueError(f"Run {run_id} is not running.")
     _mark_run_stopped(run_summary)

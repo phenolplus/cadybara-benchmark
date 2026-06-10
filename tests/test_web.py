@@ -411,6 +411,65 @@ def test_resume_run_rejects_when_no_resumable_queries(settings):
         raise AssertionError("Expected resume_run to reject a run with no resumable queries")
 
 
+def _stopped_run_with_cancelled_query(
+    experiment_id: str,
+    run_id: str,
+    query_id: str,
+    text: str,
+) -> dict:
+    return {
+        "id": run_id,
+        "experiment_id": experiment_id,
+        "status": "stopped",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "2026-06-05T12:05:00Z",
+        "parameters": {"output_format": "stl", "concurrency": 1},
+        "queries": [
+            {
+                "query_id": query_id,
+                "text": text,
+                "model": "default",
+                "images": [],
+                "status": "cancelled",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            }
+        ],
+        "summary": {"completed": 0, "failed": 0},
+    }
+
+
+def test_resume_run_uses_experiment_scoped_run_id(settings):
+    create_experiment("Resume Scope A", settings=settings)
+    create_experiment("Resume Scope B", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP002", "Create a sphere.", settings=settings)
+
+    save_run_summary(
+        _stopped_run_with_cancelled_query("EXP001", "RUN001", "Q001", "Create a cube."),
+        settings,
+    )
+    save_run_summary(
+        _stopped_run_with_cancelled_query("EXP002", "RUN001", "Q001", "Create a sphere."),
+        settings,
+    )
+
+    result = resume_run("EXP002", "RUN001", client=FakeClient(), settings=settings)
+    assert result["resumed"] is True
+
+    exp002_run = get_run("EXP002", "RUN001", settings)
+    assert exp002_run["status"] in {"completed", "completed_with_errors"}
+    assert exp002_run["queries"][0]["status"] != "cancelled"
+    assert exp002_run["queries"][0]["text"] == "Create a sphere."
+
+    exp001_run = get_run("EXP001", "RUN001", settings)
+    assert exp001_run["status"] == "stopped"
+    assert exp001_run["queries"][0]["status"] == "cancelled"
+
+
 def test_app_renders_resume_button_for_stopped_runs():
     script = (STATIC_DIR / "app.js").read_text()
 

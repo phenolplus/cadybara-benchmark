@@ -7,7 +7,7 @@ from tests.conftest import mock_generate_result
 from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.experiments import create_experiment, get_experiment
 from cadybara_benchmark.services.queries import add_query
-from cadybara_benchmark.services.runs import run_experiment, stop_run
+from cadybara_benchmark.services.runs import resume_run, run_experiment, stop_run
 from cadybara_benchmark.web import (
     STATIC_DIR,
     _query_stl_path,
@@ -277,6 +277,80 @@ def test_app_renders_stop_button_for_running_runs():
     assert "function stopRun" in script
     assert "/stop" in script
     assert "btn-outline-danger" in script
+
+
+def test_resume_run_completes_cancelled_queries(settings):
+    create_experiment("Resume Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", settings=settings)
+
+    client = BlockingClient()
+
+    def execute() -> None:
+        run_experiment("EXP001", client=client, settings=settings, concurrency=1)
+
+    thread = threading.Thread(target=execute)
+    thread.start()
+    assert client.started.wait(timeout=5)
+
+    stop_run("EXP001", "RUN001", settings=settings)
+    client.release.set()
+    thread.join(timeout=5)
+
+    stopped_run = get_run("EXP001", "RUN001", settings)
+    assert stopped_run["status"] == "stopped"
+    assert any(query["status"] == "cancelled" for query in stopped_run["queries"])
+
+    result = resume_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    assert result["resumed"] is True
+    assert result["stopped"] is False
+
+    run = get_run("EXP001", "RUN001", settings)
+    assert run["status"] == "completed"
+    assert all(query["status"] == "completed" for query in run["queries"])
+    assert get_experiment("EXP001", settings)["status"] == "completed"
+
+
+def test_resume_run_rejects_non_stopped_run(settings):
+    create_experiment("Resume Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    try:
+        resume_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    except ValueError as exc:
+        assert "not stopped" in str(exc)
+    else:
+        raise AssertionError("Expected resume_run to reject a completed run")
+
+
+def test_resume_run_rejects_when_no_cancelled_queries(settings):
+    create_experiment("Resume Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    run = get_run("EXP001", "RUN001", settings)
+    run["status"] = "stopped"
+    from cadybara_benchmark.run_files import save_run_summary
+
+    save_run_summary(run, settings)
+
+    try:
+        resume_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    except ValueError as exc:
+        assert "no cancelled queries" in str(exc)
+    else:
+        raise AssertionError("Expected resume_run to reject a run with no cancelled queries")
+
+
+def test_app_renders_resume_button_for_stopped_runs():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert "function canResumeRun" in script
+    assert "function resumeRun" in script
+    assert "/resume" in script
+    assert 'query.status === "cancelled"' in script
+    assert "btn-outline-success" in script
 
 
 def test_app_route_resets_modal_backdrop():

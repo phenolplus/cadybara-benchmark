@@ -26,6 +26,7 @@ from cadybara_benchmark.run_files import get_run
 from cadybara_benchmark.services.runs import (
     list_results_for_experiment,
     list_runs,
+    resume_run,
     run_experiment,
     stop_run,
 )
@@ -199,6 +200,49 @@ def api_stop_run(experiment_id: str, run_id: str) -> dict[str, Any]:
         return stop_run(experiment_id, run_id)
     except Exception as exc:
         raise _http_error(exc) from exc
+
+
+@app.post("/api/experiments/{experiment_id}/runs/{run_id}/resume")
+def api_resume_run(
+    experiment_id: str,
+    run_id: str,
+    payload: RunRequest,
+) -> StreamingResponse:
+    try:
+        get_settings().require_api_key()
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+    def stream_resume_events() -> Iterator[str]:
+        events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def on_event(event: str, event_payload: dict[str, Any]) -> None:
+            events.put((event, event_payload))
+
+        def execute_resume() -> None:
+            try:
+                result = resume_run(
+                    experiment_id,
+                    run_id,
+                    concurrency=payload.concurrency,
+                    on_event=on_event,
+                )
+                events.put(("finished", result))
+            except Exception as exc:
+                events.put(("error", {"message": str(exc) or exc.__class__.__name__}))
+            finally:
+                events.put(None)
+
+        threading.Thread(target=execute_resume, daemon=True).start()
+
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            event, event_payload = item
+            yield _sse_message(event, event_payload)
+
+    return StreamingResponse(stream_resume_events(), media_type="text/event-stream")
 
 
 @app.get("/api/experiments/{experiment_id}/runs/{run_id}")

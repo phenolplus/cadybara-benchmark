@@ -252,6 +252,7 @@ function runRows(run, experimentId) {
       <td class="text-body-secondary small">${escapeHtml(run.started_at || "")}</td>
       <td class="text-nowrap">
         ${run.status === "running" ? `<button class="btn btn-sm btn-outline-danger" onclick="stopRun('${escapeAttr(runId)}')">Stop</button>` : ""}
+        ${canResumeRun(run) ? `<button class="btn btn-sm btn-outline-success" onclick="resumeRun('${escapeAttr(runId)}')">Resume</button>` : ""}
         <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
         <button class="btn btn-sm btn-outline-primary" onclick="publishRun('${escapeAttr(runId)}')">Publish</button>
       </td>
@@ -708,6 +709,21 @@ function enrichRun(run) {
   };
 }
 
+function canResumeRun(run) {
+  return run.status === "stopped" && (run.queries || []).some((query) => query.status === "cancelled");
+}
+
+function markRunAsRunning(runId) {
+  if (!state.current) return;
+  const run = state.current.runs?.find((item) => item.id === runId);
+  if (!run) return;
+  run.status = "running";
+  run.finished_at = "";
+  state.current.status = "running";
+  state.pendingRunId = runId;
+  renderExperimentPage(state.current);
+}
+
 async function stopRun(runId) {
   const experimentId = state.current.id;
   if (!confirm(`Stop run ${runId}?`)) return;
@@ -717,6 +733,79 @@ async function stopRun(runId) {
   state.pendingRunId = null;
   showAlert(`Run ${runId} stopped.`, "info");
   await renderExperiment(experimentId);
+}
+
+async function resumeRun(runId) {
+  const experimentId = state.current.id;
+  const concurrency = parseRunConcurrency();
+  if (concurrency === null) return;
+  if (!confirm(`Resume run ${runId} for cancelled queries with concurrency ${concurrency}?`)) return;
+
+  markRunAsRunning(runId);
+  showAlert(`Run ${runId} resumed.`, "info");
+
+  try {
+    await resumeRunWithProgress(experimentId, runId, concurrency);
+  } catch (error) {
+    state.pendingRunId = null;
+    if (error.message) showAlert(error.message, "danger");
+    await renderExperiment(experimentId);
+  }
+}
+
+async function resumeRunWithProgress(experimentId, runId, concurrency) {
+  const response = await fetch(
+    `/api/experiments/${experimentId}/runs/${encodeURIComponent(runId)}/resume`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ concurrency }),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || response.statusText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = parseSseChunk(chunk);
+      if (!event) continue;
+      if (event.event === "finished") {
+        result = event.payload;
+        if (result?.stopped) {
+          showAlert(`Run ${result.run_id} stopped.`, "info");
+        }
+        continue;
+      }
+      if (event.event === "error") {
+        throw new Error(event.payload.message || "Resume failed.");
+      }
+      await handleRunProgressEvent(experimentId, event);
+    }
+  }
+
+  if (!result) {
+    throw new Error("Resume finished without a summary.");
+  }
+  state.pendingRunId = null;
+  await renderExperiment(experimentId);
+  if (!result.stopped) {
+    showAlert(`Run resumed: ${result.completed} completed, ${result.failed} failed.`, "success");
+  }
+  return result;
 }
 
 async function publishRun(runId) {

@@ -51,6 +51,105 @@ def list_results_for_experiment(
     return results
 
 
+def resume_run(
+    experiment_id: str,
+    run_id: str,
+    client: CadybaraApiClient | None = None,
+    settings: Settings | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    concurrency: int | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    if _get_active_run(run_id) is not None:
+        raise ValueError(f"Run {run_id} is already running.")
+
+    run_summary = get_run_by_id(run_id, settings)
+    if run_summary.get("experiment_id") != experiment_id:
+        raise ValueError(f"Run not found: {run_id}")
+    if run_summary["status"] != "stopped":
+        raise ValueError(f"Run {run_id} is not stopped.")
+
+    cancelled_indices = [
+        index
+        for index, query_entry in enumerate(run_summary.get("queries", []))
+        if query_entry.get("status") == "cancelled"
+    ]
+    if not cancelled_indices:
+        raise ValueError(f"Run {run_id} has no cancelled queries to resume.")
+
+    experiment = get_experiment(experiment_id, settings)
+    experiment_queries = {query["id"]: query for query in experiment.get("queries", [])}
+    base_parameters = dict(run_summary.get("parameters") or {})
+    output_format = str(base_parameters.get("output_format", "stl"))
+    if output_format not in {"stl", "step"}:
+        raise ValueError("output_format must be 'stl' or 'step'")
+    worker_concurrency = concurrency if concurrency is not None else int(base_parameters.get("concurrency", 1))
+    if worker_concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
+
+    default_model = experiment["setup"].get("model", "default")
+    client = client or CadybaraApiClient(settings)
+    update_experiment_status(experiment_id, "running", settings)
+
+    run_summary["status"] = "running"
+    run_summary["finished_at"] = ""
+    save_run_summary(run_summary, settings)
+
+    cancel_event = threading.Event()
+    summary_lock = threading.Lock()
+    active_run = _ActiveRun(
+        experiment_id=experiment_id,
+        cancel_event=cancel_event,
+        lock=summary_lock,
+        run_summary=run_summary,
+    )
+    _register_active_run(run_id, active_run)
+
+    if on_event:
+        on_event(
+            "run_started",
+            {"run_id": run_id, "experiment_id": experiment_id, "resumed": True},
+        )
+
+    work_items: list[tuple[int, dict[str, Any]]] = []
+    for index in cancelled_indices:
+        query_entry = run_summary["queries"][index]
+        experiment_query = experiment_queries.get(query_entry["query_id"])
+        if experiment_query is None:
+            raise ValueError(f"Query not found in experiment: {query_entry['query_id']}")
+        work_items.append((index, experiment_query))
+
+    try:
+        stopped = _run_query_work(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            run_summary=run_summary,
+            work_items=work_items,
+            base_parameters=base_parameters,
+            default_model=default_model,
+            output_format=output_format,
+            client=client,
+            settings=settings,
+            cancel_event=cancel_event,
+            summary_lock=summary_lock,
+            on_event=on_event,
+            concurrency=worker_concurrency,
+        )
+    finally:
+        _unregister_active_run(run_id)
+
+    summary = run_summary.get("summary", {})
+    return {
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "run_ids": [run_id],
+        "completed": summary.get("completed", 0),
+        "failed": summary.get("failed", 0),
+        "stopped": stopped,
+        "resumed": True,
+    }
+
+
 def stop_run(
     experiment_id: str,
     run_id: str,
@@ -171,21 +270,67 @@ def run_experiment(
             {"run_id": run_id, "experiment_id": experiment_id},
         )
 
-    completed = 0
-    failed = 0
+    work_items = list(enumerate(queries))
 
-    def execute_query(index: int) -> None:
-        nonlocal completed, failed
-        query = queries[index]
-        query_entry = query_entries[index]
+    try:
+        stopped = _run_query_work(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            run_summary=run_summary,
+            work_items=work_items,
+            base_parameters=base_parameters,
+            default_model=default_model,
+            output_format=output_format,
+            client=client,
+            settings=settings,
+            cancel_event=cancel_event,
+            summary_lock=summary_lock,
+            on_event=on_event,
+            concurrency=concurrency,
+        )
+    finally:
+        _unregister_active_run(run_id)
+
+    summary = run_summary.get("summary", {})
+    return {
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "run_ids": [run_id],
+        "completed": summary.get("completed", 0),
+        "failed": summary.get("failed", 0),
+        "stopped": stopped,
+    }
+
+
+def _run_query_work(
+    experiment_id: str,
+    run_id: str,
+    run_summary: dict[str, Any],
+    work_items: list[tuple[int, dict[str, Any]]],
+    base_parameters: dict[str, Any],
+    default_model: str,
+    output_format: str,
+    client: CadybaraApiClient,
+    settings: Settings,
+    cancel_event: threading.Event,
+    summary_lock: threading.Lock,
+    on_event: Callable[[str, dict[str, Any]], None] | None,
+    concurrency: int,
+) -> bool:
+    query_entries = run_summary["queries"]
+
+    def execute_work_item(work_index: int, query: dict[str, Any]) -> None:
+        query_entry = query_entries[work_index]
 
         with summary_lock:
             if cancel_event.is_set():
                 if query_entry["status"] in {"pending", "running"}:
                     query_entry["status"] = "cancelled"
+                    _sync_run_summary_counts(run_summary)
                     save_run_summary(run_summary, settings)
                 return
             query_entry["status"] = "running"
+            query_entry["error"] = {}
             save_run_summary(run_summary, settings)
         if on_event:
             on_event(
@@ -197,14 +342,12 @@ def run_experiment(
         artifact_dir.mkdir(parents=True, exist_ok=True)
         query_entry["artifact_dir"] = _stored_path(artifact_dir)
 
-        query_completed = 0
-        query_failed = 0
         try:
             query_model = query.get("model") or default_model
             full_parameters = {
                 key: value
                 for key, value in {**base_parameters, "model": query_model}.items()
-                if key != "concurrency"
+                if key not in {"concurrency", "output_format"}
             }
             stored_images = query.get("images") or []
             api_images = load_api_images(stored_images)
@@ -224,7 +367,6 @@ def run_experiment(
                 query_entry["status"] = "completed"
                 query_entry["response_metadata"] = result.response_metadata
                 query_entry["metrics"] = result.raw_response.get("metrics", {})
-                query_completed = 1
                 if on_event:
                     on_event(
                         "completed",
@@ -238,7 +380,6 @@ def run_experiment(
                 error_path.write_text(dumps_json(exc.payload))
                 query_entry["status"] = "failed"
                 query_entry["error"] = exc.payload
-                query_failed = 1
                 if on_event:
                     on_event(
                         "failed",
@@ -257,7 +398,6 @@ def run_experiment(
                 error_path.write_text(dumps_json(error))
                 query_entry["status"] = "failed"
                 query_entry["error"] = error
-                query_failed = 1
                 if on_event:
                     on_event(
                         "failed",
@@ -269,43 +409,56 @@ def run_experiment(
                     )
 
         with summary_lock:
-            completed += query_completed
-            failed += query_failed
-            run_summary["summary"] = {"completed": completed, "failed": failed}
+            _sync_run_summary_counts(run_summary)
             save_run_summary(run_summary, settings)
 
-    try:
-        worker_count = min(concurrency, len(queries))
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(execute_query, index) for index in range(len(queries))]
-            for future in futures:
-                future.result()
+    worker_count = min(concurrency, len(work_items))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = [
+            executor.submit(execute_work_item, work_index, query)
+            for work_index, query in work_items
+        ]
+        for future in futures:
+            future.result()
 
+    return _finalize_run_after_work(
+        experiment_id,
+        run_summary,
+        cancel_event,
+        summary_lock,
+        settings,
+    )
+
+
+def _finalize_run_after_work(
+    experiment_id: str,
+    run_summary: dict[str, Any],
+    cancel_event: threading.Event,
+    summary_lock: threading.Lock,
+    settings: Settings,
+) -> bool:
+    with summary_lock:
+        _sync_run_summary_counts(run_summary)
         if cancel_event.is_set():
-            with summary_lock:
-                _mark_run_stopped(run_summary)
-                save_run_summary(run_summary, settings)
-            update_experiment_status(experiment_id, "stopped", settings)
-            stopped = True
-        else:
-            run_summary["status"] = "completed" if failed == 0 else "completed_with_errors"
-            run_summary["finished_at"] = utc_now()
+            _mark_run_stopped(run_summary)
             save_run_summary(run_summary, settings)
-            update_experiment_status(
-                experiment_id, "completed" if failed == 0 else "completed_with_errors", settings
-            )
-            stopped = False
-    finally:
-        _unregister_active_run(run_id)
+            update_experiment_status(experiment_id, "stopped", settings)
+            return True
 
-    return {
-        "experiment_id": experiment_id,
-        "run_id": run_id,
-        "run_ids": [run_id],
-        "completed": completed,
-        "failed": failed,
-        "stopped": stopped,
-    }
+        queries = run_summary.get("queries", [])
+        failed = any(query.get("status") == "failed" for query in queries)
+        run_summary["status"] = "completed" if not failed else "completed_with_errors"
+        run_summary["finished_at"] = utc_now()
+        save_run_summary(run_summary, settings)
+        update_experiment_status(experiment_id, run_summary["status"], settings)
+        return False
+
+
+def _sync_run_summary_counts(run_summary: dict[str, Any]) -> None:
+    queries = run_summary.get("queries", [])
+    completed = sum(1 for query in queries if query.get("status") == "completed")
+    failed = sum(1 for query in queries if query.get("status") == "failed")
+    run_summary["summary"] = {"completed": completed, "failed": failed}
 
 
 def _register_active_run(run_id: str, active_run: _ActiveRun) -> None:

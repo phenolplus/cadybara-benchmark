@@ -360,12 +360,21 @@ async function toggleRunRow(runId) {
   }
 
   if (state.current?.id) {
-    await refreshRunInState(state.current.id, runId);
+    const experimentId = state.current.id;
     const expandedRunIds = getExpandedRunIds();
     if (!expandedRunIds.includes(runId)) {
       expandedRunIds.push(runId);
     }
-    renderExperimentPage(state.current, { expandedRunIds });
+    row.setAttribute("aria-busy", "true");
+    row.classList.add("run-row-loading");
+    try {
+      state.current = await api(`/api/experiments/${experimentId}`);
+      renderExperimentPage(state.current, { expandedRunIds });
+    } catch (error) {
+      row.removeAttribute("aria-busy");
+      row.classList.remove("run-row-loading");
+      if (error.message) showAlert(error.message, "danger");
+    }
     return;
   }
 

@@ -24,6 +24,7 @@ from cadybara_benchmark.query_images import resolve_query_image_path
 from cadybara_benchmark.services.queries import add_query, list_queries
 from cadybara_benchmark.services.runs import (
     get_reconciled_run,
+    list_reconciled_runs,
     list_results_for_experiment,
     list_runs,
     resume_run,
@@ -111,8 +112,8 @@ def api_create_experiment(payload: ExperimentCreate) -> dict[str, Any]:
 @app.get("/api/experiments/{experiment_id}")
 def api_get_experiment(experiment_id: str) -> dict[str, Any]:
     try:
+        runs = [_with_run_stats(run) for run in list_reconciled_runs(experiment_id)]
         experiment = get_experiment(experiment_id)
-        runs = [_with_run_stats(run) for run in list_runs(experiment_id)]
         results = list_results_for_experiment(experiment_id)
     except Exception as exc:
         raise _http_error(exc) from exc
@@ -355,7 +356,7 @@ def _stored_path(path: Path) -> str:
 
 
 def _run_payload(experiment_id: str, run_id: str) -> dict[str, Any]:
-    run = get_reconciled_run(experiment_id, run_id)
+    run = _with_run_stats(get_reconciled_run(experiment_id, run_id))
     queries = []
     for query in run.get("queries", []):
         query = _with_query_api_fields(query)

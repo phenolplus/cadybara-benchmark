@@ -40,6 +40,14 @@ def list_runs(experiment_id: str, settings: Settings | None = None) -> list[dict
     return list_run_summaries(experiment_id, settings)
 
 
+def list_reconciled_runs(experiment_id: str, settings: Settings | None = None) -> list[dict[str, Any]]:
+    settings = settings or get_settings()
+    return [
+        reconcile_persisted_run_state(run, settings)
+        for run in list_run_summaries(experiment_id, settings)
+    ]
+
+
 def get_reconciled_run(
     experiment_id: str,
     run_id: str,
@@ -56,8 +64,13 @@ def reconcile_persisted_run_state(
 ) -> dict[str, Any]:
     settings = settings or get_settings()
     run_id = run_summary["id"]
-    if _get_active_run(run_id) is not None:
-        return run_summary
+    active = _get_active_run(run_id)
+    if active is not None:
+        with active.lock:
+            in_memory = dict(active.run_summary)
+        if _run_is_incomplete(in_memory) and in_memory.get("status") == "running":
+            return run_summary
+        _unregister_active_run(run_id)
     if not _run_is_incomplete(run_summary):
         return run_summary
 

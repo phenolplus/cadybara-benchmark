@@ -550,7 +550,122 @@ def test_app_reconciles_run_when_expanding_row():
     script = (STATIC_DIR / "app.js").read_text()
 
     assert "async function toggleRunRow" in script
-    assert "await refreshRunInState(state.current.id, runId);" in script
+    assert "state.current = await api(`/api/experiments/${experimentId}`);" in script
+
+
+def test_api_get_experiment_reconciles_orphaned_runs(settings, monkeypatch):
+    from cadybara_benchmark.experiment_files import save_experiment
+    from cadybara_benchmark.web import api_get_experiment
+
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "running",
+            "started_at": "2026-06-05T12:00:00Z",
+            "finished_at": "",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "Q001",
+                    "text": "Create a cube.",
+                    "model": "default",
+                    "images": [],
+                    "status": "running",
+                    "error": {},
+                    "artifact_dir": "",
+                    "response_metadata": {},
+                    "score": None,
+                    "metrics": {},
+                }
+            ],
+            "summary": {"completed": 0, "failed": 0},
+        },
+        settings,
+    )
+    experiment = get_experiment("EXP001", settings)
+    experiment["status"] = "running"
+    save_experiment(experiment, settings)
+
+    payload = api_get_experiment("EXP001")
+    assert payload["status"] == "stopped"
+    assert payload["runs"][0]["status"] == "stopped"
+    assert payload["runs"][0]["queries"][0]["status"] == "cancelled"
+
+
+def test_reconcile_persisted_run_unregisters_stale_active_run(settings):
+    from cadybara_benchmark.services.runs import _ActiveRun, _register_active_run
+
+    create_experiment("Reconcile Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "running",
+            "started_at": "2026-06-05T12:00:00Z",
+            "finished_at": "",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "Q001",
+                    "text": "Create a cube.",
+                    "model": "default",
+                    "images": [],
+                    "status": "pending",
+                    "error": {},
+                    "artifact_dir": "",
+                    "response_metadata": {},
+                    "score": None,
+                    "metrics": {},
+                }
+            ],
+            "summary": {"completed": 0, "failed": 0},
+        },
+        settings,
+    )
+
+    stale_summary = {
+        "id": "RUN001",
+        "experiment_id": "EXP001",
+        "status": "stopped",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "2026-06-05T12:05:00Z",
+        "parameters": {},
+        "queries": [
+            {
+                "query_id": "Q001",
+                "text": "Create a cube.",
+                "model": "default",
+                "images": [],
+                "status": "cancelled",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            }
+        ],
+        "summary": {"completed": 0, "failed": 0},
+    }
+    _register_active_run(
+        "RUN001",
+        _ActiveRun(
+            experiment_id="EXP001",
+            cancel_event=threading.Event(),
+            lock=threading.Lock(),
+            run_summary=stale_summary,
+        ),
+    )
+
+    run = get_run("EXP001", "RUN001", settings)
+    reconciled = reconcile_persisted_run_state(run, settings=settings)
+    assert reconciled["status"] == "stopped"
+    assert reconciled["queries"][0]["status"] == "cancelled"
 
 
 def test_app_route_resets_modal_backdrop():

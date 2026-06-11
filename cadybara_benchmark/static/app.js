@@ -224,16 +224,16 @@ function queriesTable(queries) {
 }
 
 function shouldShowResume(run) {
-  if (run.can_resume === true) return true;
   if (run.status !== "stopped") return false;
+  if (run.can_resume === true) return true;
   return (run.queries || []).some((query) =>
     query.status === "cancelled" || query.status === "pending" || query.status === "running",
   );
 }
 
 function shouldShowRetry(run) {
-  if (run.can_retry === true) return true;
   if (run.status !== "completed_with_errors") return false;
+  if (run.can_retry === true) return true;
   return (run.queries || []).some((query) => query.status === "failed");
 }
 
@@ -780,6 +780,15 @@ function markRunAsRunning(runId) {
   if (!run) return;
   run.status = "running";
   run.finished_at = "";
+  run.can_retry = false;
+  run.can_resume = false;
+  for (const query of run.queries || []) {
+    if (query.status === "failed") {
+      query.status = "pending";
+      query.error = {};
+    }
+  }
+  Object.assign(run, enrichRun(run));
   state.current.status = "running";
   state.pendingRunId = runId;
   renderExperimentPage(state.current);

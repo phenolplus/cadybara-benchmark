@@ -496,6 +496,18 @@ def test_app_renders_retry_button_for_failed_runs():
     assert "run.can_retry" in script
     assert 'runActionButton("Retry", "retry"' in script
     assert "btn-outline-warning" in script
+    assert script.index('run.status !== "completed_with_errors"') < script.index("run.can_retry")
+
+
+def test_should_show_retry_hides_while_running():
+    script = (STATIC_DIR / "app.js").read_text()
+    start = script.index("function shouldShowRetry")
+    end = script.index("function runActionButton", start)
+    body = script[start:end]
+
+    status_guard = body.index('run.status !== "completed_with_errors"')
+    can_retry_check = body.index("run.can_retry")
+    assert status_guard < can_retry_check
 
 
 def test_with_run_stats_exposes_can_resume(settings, monkeypatch):

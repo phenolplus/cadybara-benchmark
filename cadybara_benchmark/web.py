@@ -29,10 +29,12 @@ from cadybara_benchmark.services.queries import add_query, list_queries
 from cadybara_benchmark.services.runs import (
     get_reconciled_run,
     has_resumable_queries,
+    has_retryable_queries,
     list_reconciled_runs,
     list_results_for_experiment,
     list_runs,
     resume_run,
+    retry_run,
     run_experiment,
     stop_run,
 )
@@ -251,6 +253,49 @@ def api_resume_run(
     return StreamingResponse(stream_resume_events(), media_type="text/event-stream")
 
 
+@app.post("/api/experiments/{experiment_id}/runs/{run_id}/retry")
+def api_retry_run(
+    experiment_id: str,
+    run_id: str,
+    payload: RunRequest,
+) -> StreamingResponse:
+    try:
+        get_settings().require_api_key()
+    except Exception as exc:
+        raise _http_error(exc) from exc
+
+    def stream_retry_events() -> Iterator[str]:
+        events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def on_event(event: str, event_payload: dict[str, Any]) -> None:
+            events.put((event, event_payload))
+
+        def execute_retry() -> None:
+            try:
+                result = retry_run(
+                    experiment_id,
+                    run_id,
+                    concurrency=payload.concurrency,
+                    on_event=on_event,
+                )
+                events.put(("finished", result))
+            except Exception as exc:
+                events.put(("error", {"message": str(exc) or exc.__class__.__name__}))
+            finally:
+                events.put(None)
+
+        threading.Thread(target=execute_retry, daemon=True).start()
+
+        while True:
+            item = events.get()
+            if item is None:
+                break
+            event, event_payload = item
+            yield _sse_message(event, event_payload)
+
+    return StreamingResponse(stream_retry_events(), media_type="text/event-stream")
+
+
 @app.get("/api/experiments/{experiment_id}/runs/{run_id}")
 def api_get_run(experiment_id: str, run_id: str) -> dict[str, Any]:
     try:
@@ -346,6 +391,7 @@ def _with_run_stats(run: dict[str, Any]) -> dict[str, Any]:
         "total_client_latency_ms": total_client_latency_ms(queries),
         "eta_ms": run_eta_ms(queries) if run.get("status") == "running" else None,
         "can_resume": has_resumable_queries(run),
+        "can_retry": has_retryable_queries(run),
     }
 
 

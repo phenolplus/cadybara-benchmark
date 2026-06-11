@@ -11,6 +11,7 @@ from cadybara_benchmark.run_files import save_run_summary
 from cadybara_benchmark.services.runs import (
     reconcile_persisted_run_state,
     resume_run,
+    retry_run,
     run_experiment,
     stop_run,
 )
@@ -485,6 +486,18 @@ def test_app_renders_resume_button_for_stopped_runs():
     assert "Resume cancelled queries" in script
 
 
+def test_app_renders_retry_button_for_failed_runs():
+    script = (STATIC_DIR / "app.js").read_text()
+
+    assert "function shouldShowRetry" in script
+    assert "function retryRun" in script
+    assert "/retry" in script
+    assert 'query.status === "failed"' in script
+    assert "run.can_retry" in script
+    assert 'runActionButton("Retry", "retry"' in script
+    assert "btn-outline-warning" in script
+
+
 def test_with_run_stats_exposes_can_resume(settings, monkeypatch):
     _patch_settings(monkeypatch, settings)
 
@@ -519,6 +532,148 @@ def test_with_run_stats_exposes_can_resume(settings, monkeypatch):
 
     run = _with_run_stats(get_run("EXP001", "RUN001", settings))
     assert run["can_resume"] is True
+
+
+def test_with_run_stats_exposes_can_retry(settings, monkeypatch):
+    _patch_settings(monkeypatch, settings)
+
+    create_experiment("Retry Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    save_run_summary(
+        _completed_run_with_failed_query("EXP001", "RUN001", "Q001", "Create a cube."),
+        settings,
+    )
+
+    run = _with_run_stats(get_run("EXP001", "RUN001", settings))
+    assert run["can_retry"] is True
+
+
+def _completed_run_with_failed_query(
+    experiment_id: str,
+    run_id: str,
+    query_id: str,
+    text: str,
+    *,
+    completed_query_id: str | None = None,
+    completed_text: str | None = None,
+) -> dict:
+    queries = []
+    if completed_query_id is not None:
+        queries.append(
+            {
+                "query_id": completed_query_id,
+                "text": completed_text or "",
+                "model": "default",
+                "images": [],
+                "status": "completed",
+                "error": {},
+                "artifact_dir": "",
+                "response_metadata": {},
+                "score": None,
+                "metrics": {},
+            }
+        )
+    queries.append(
+        {
+            "query_id": query_id,
+            "text": text,
+            "model": "default",
+            "images": [],
+            "status": "failed",
+            "error": {"message": "API error"},
+            "artifact_dir": "",
+            "response_metadata": {},
+            "score": None,
+            "metrics": {},
+        }
+    )
+    completed = sum(1 for query in queries if query["status"] == "completed")
+    failed = sum(1 for query in queries if query["status"] == "failed")
+    return {
+        "id": run_id,
+        "experiment_id": experiment_id,
+        "status": "completed_with_errors",
+        "started_at": "2026-06-05T12:00:00Z",
+        "finished_at": "2026-06-05T12:05:00Z",
+        "parameters": {
+            "response_mode": "json",
+            "return_format": "code",
+            "export_format": "code",
+            "linear_deflection": 0.1,
+            "angular_deflection": 0.1,
+            "concurrency": 1,
+            "output_format": "stl",
+        },
+        "queries": queries,
+        "summary": {"completed": completed, "failed": failed},
+    }
+
+
+def test_retry_run_retries_failed_queries(settings):
+    create_experiment("Retry Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    add_query("EXP001", "Create a sphere.", settings=settings)
+    save_run_summary(
+        _completed_run_with_failed_query(
+            "EXP001",
+            "RUN001",
+            "Q002",
+            "Create a sphere.",
+            completed_query_id="Q001",
+            completed_text="Create a cube.",
+        ),
+        settings,
+    )
+
+    result = retry_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    assert result["retried"] is True
+    assert result["stopped"] is False
+
+    run = get_run("EXP001", "RUN001", settings)
+    assert run["status"] == "completed"
+    assert all(query["status"] == "completed" for query in run["queries"])
+    assert get_experiment("EXP001", settings)["status"] == "completed"
+
+
+def test_retry_run_rejects_non_failed_run(settings):
+    create_experiment("Retry Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_experiment("EXP001", client=FakeClient(), settings=settings)
+
+    try:
+        retry_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    except ValueError as exc:
+        assert "no failed queries" in str(exc)
+    else:
+        raise AssertionError("Expected retry_run to reject a completed run")
+
+
+def test_retry_run_rejects_when_already_running(settings):
+    import threading
+
+    from cadybara_benchmark.services.runs import _ActiveRun, _register_active_run, _unregister_active_run
+
+    create_experiment("Retry Test", settings=settings)
+    add_query("EXP001", "Create a cube.", settings=settings)
+    run_summary = _completed_run_with_failed_query("EXP001", "RUN001", "Q001", "Create a cube.")
+    save_run_summary(run_summary, settings)
+
+    cancel_event = threading.Event()
+    active_run = _ActiveRun(
+        experiment_id="EXP001",
+        cancel_event=cancel_event,
+        lock=threading.Lock(),
+        run_summary=run_summary,
+    )
+    _register_active_run("RUN001", active_run)
+    try:
+        retry_run("EXP001", "RUN001", client=FakeClient(), settings=settings)
+    except ValueError as exc:
+        assert "already running" in str(exc)
+    else:
+        raise AssertionError("Expected retry_run to reject an already running run")
+    finally:
+        _unregister_active_run("RUN001")
 
 
 def test_reconcile_finalizes_orphaned_completed_run(settings):

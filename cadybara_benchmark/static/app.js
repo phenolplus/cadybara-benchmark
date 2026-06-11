@@ -231,6 +231,12 @@ function shouldShowResume(run) {
   );
 }
 
+function shouldShowRetry(run) {
+  if (run.can_retry === true) return true;
+  if (run.status !== "completed_with_errors") return false;
+  return (run.queries || []).some((query) => query.status === "failed");
+}
+
 function runActionButton(label, action, runId, className) {
   return `<button type="button" class="btn btn-sm ${className}" data-run-action="${escapeAttr(action)}" data-run-id="${escapeAttr(runId)}">${escapeHtml(label)}</button>`;
 }
@@ -265,6 +271,7 @@ function runRows(run, experimentId) {
       <td class="run-actions-cell">
         <div class="run-actions">
           ${run.status === "running" ? runActionButton("Stop", "stop", runId, "btn-outline-danger") : ""}
+          ${shouldShowRetry(run) ? runActionButton("Retry", "retry", runId, "btn-outline-warning") : ""}
           ${shouldShowResume(run) ? runActionButton("Resume", "resume", runId, "btn-outline-success") : ""}
           <a class="btn btn-sm btn-outline-secondary" href="/compare/${escapeAttr(experimentId)}/${escapeAttr(runId)}">Compare</a>
           ${runActionButton("Publish", "publish", runId, "btn-outline-primary")}
@@ -325,6 +332,7 @@ function bindRunsTable() {
       event.stopPropagation();
       const runId = action.dataset.runId;
       if (action.dataset.runAction === "stop") stopRun(runId);
+      if (action.dataset.runAction === "retry") retryRun(runId);
       if (action.dataset.runAction === "resume") resumeRun(runId);
       if (action.dataset.runAction === "publish") publishRun(runId);
       return;
@@ -786,6 +794,79 @@ async function stopRun(runId) {
   state.pendingRunId = null;
   showAlert(`Run ${runId} stopped.`, "info");
   await renderExperiment(experimentId);
+}
+
+async function retryRun(runId) {
+  const experimentId = state.current.id;
+  const concurrency = parseRunConcurrency();
+  if (concurrency === null) return;
+  if (!confirm(`Retry failed queries in run ${runId} with concurrency ${concurrency}?`)) return;
+
+  markRunAsRunning(runId);
+  showAlert(`Run ${runId} retry started.`, "info");
+
+  try {
+    await retryRunWithProgress(experimentId, runId, concurrency);
+  } catch (error) {
+    state.pendingRunId = null;
+    if (error.message) showAlert(error.message, "danger");
+    await renderExperiment(experimentId);
+  }
+}
+
+async function retryRunWithProgress(experimentId, runId, concurrency) {
+  const response = await fetch(
+    `/api/experiments/${experimentId}/runs/${encodeURIComponent(runId)}/retry`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ concurrency }),
+    },
+  );
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || response.statusText);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const event = parseSseChunk(chunk);
+      if (!event) continue;
+      if (event.event === "finished") {
+        result = event.payload;
+        if (result?.stopped) {
+          showAlert(`Run ${result.run_id} stopped.`, "info");
+        }
+        continue;
+      }
+      if (event.event === "error") {
+        throw new Error(event.payload.message || "Retry failed.");
+      }
+      await handleRunProgressEvent(experimentId, event);
+    }
+  }
+
+  if (!result) {
+    throw new Error("Retry finished without a summary.");
+  }
+  state.pendingRunId = null;
+  await renderExperiment(experimentId);
+  if (!result.stopped) {
+    showAlert(`Run retried: ${result.completed} completed, ${result.failed} failed.`, "success");
+  }
+  return result;
 }
 
 async function resumeRun(runId) {

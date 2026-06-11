@@ -35,6 +35,7 @@ class _ActiveRun:
 _active_runs: dict[str, _ActiveRun] = {}
 _active_runs_lock = threading.Lock()
 _RESUMABLE_QUERY_STATUSES = frozenset({"cancelled", "pending", "running"})
+_RETRYABLE_QUERY_STATUSES = frozenset({"failed"})
 _INFLIGHT_QUERY_STATUSES = frozenset({"pending", "running"})
 
 
@@ -112,6 +113,105 @@ def list_results_for_experiment(
                 continue
             results.append(_query_result(run, query))
     return results
+
+
+def retry_run(
+    experiment_id: str,
+    run_id: str,
+    client: CadybaraApiClient | None = None,
+    settings: Settings | None = None,
+    on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    concurrency: int | None = None,
+) -> dict[str, Any]:
+    settings = settings or get_settings()
+    if _get_active_run(run_id) is not None:
+        raise ValueError(f"Run {run_id} is already running.")
+
+    run_summary = get_reconciled_run(experiment_id, run_id, settings)
+    if run_summary["status"] != "completed_with_errors":
+        raise ValueError(f"Run {run_id} has no failed queries to retry.")
+
+    retryable_indices = _retryable_query_indices(run_summary)
+    if not retryable_indices:
+        raise ValueError(f"Run {run_id} has no failed queries to retry.")
+
+    for index in retryable_indices:
+        query_entry = run_summary["queries"][index]
+        query_entry["status"] = "pending"
+        query_entry["error"] = {}
+
+    experiment = get_experiment(experiment_id, settings)
+    experiment_queries = {query["id"]: query for query in experiment.get("queries", [])}
+    base_parameters = dict(run_summary.get("parameters") or {})
+    output_format = str(base_parameters.get("output_format", "stl"))
+    if output_format not in {"stl", "step"}:
+        raise ValueError("output_format must be 'stl' or 'step'")
+    worker_concurrency = concurrency if concurrency is not None else int(base_parameters.get("concurrency", 1))
+    if worker_concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
+
+    default_model = experiment["setup"].get("model", "default")
+    client = client or CadybaraApiClient(settings)
+    update_experiment_status(experiment_id, "running", settings)
+
+    run_summary["status"] = "running"
+    run_summary["finished_at"] = ""
+    _sync_run_summary_counts(run_summary)
+    save_run_summary(run_summary, settings)
+
+    cancel_event = threading.Event()
+    summary_lock = threading.Lock()
+    active_run = _ActiveRun(
+        experiment_id=experiment_id,
+        cancel_event=cancel_event,
+        lock=summary_lock,
+        run_summary=run_summary,
+    )
+    _register_active_run(run_id, active_run)
+
+    if on_event:
+        on_event(
+            "run_started",
+            {"run_id": run_id, "experiment_id": experiment_id, "retried": True},
+        )
+
+    work_items: list[tuple[int, dict[str, Any]]] = []
+    for index in retryable_indices:
+        query_entry = run_summary["queries"][index]
+        experiment_query = experiment_queries.get(query_entry["query_id"])
+        if experiment_query is None:
+            raise ValueError(f"Query not found in experiment: {query_entry['query_id']}")
+        work_items.append((index, experiment_query))
+
+    try:
+        stopped = _run_query_work(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            run_summary=run_summary,
+            work_items=work_items,
+            base_parameters=base_parameters,
+            default_model=default_model,
+            output_format=output_format,
+            client=client,
+            settings=settings,
+            cancel_event=cancel_event,
+            summary_lock=summary_lock,
+            on_event=on_event,
+            concurrency=worker_concurrency,
+        )
+    finally:
+        _unregister_active_run(run_id)
+
+    summary = run_summary.get("summary", {})
+    return {
+        "experiment_id": experiment_id,
+        "run_id": run_id,
+        "run_ids": [run_id],
+        "completed": summary.get("completed", 0),
+        "failed": summary.get("failed", 0),
+        "stopped": stopped,
+        "retried": True,
+    }
 
 
 def resume_run(
@@ -550,6 +650,20 @@ def _resumable_query_indices(run_summary: dict[str, Any]) -> list[int]:
 
 def has_resumable_queries(run_summary: dict[str, Any]) -> bool:
     return run_summary.get("status") == "stopped" and bool(_resumable_query_indices(run_summary))
+
+
+def _retryable_query_indices(run_summary: dict[str, Any]) -> list[int]:
+    return [
+        index
+        for index, query_entry in enumerate(run_summary.get("queries", []))
+        if query_entry.get("status") in _RETRYABLE_QUERY_STATUSES
+    ]
+
+
+def has_retryable_queries(run_summary: dict[str, Any]) -> bool:
+    return run_summary.get("status") == "completed_with_errors" and bool(
+        _retryable_query_indices(run_summary)
+    )
 
 
 def _mark_run_stopped(run_summary: dict[str, Any]) -> None:

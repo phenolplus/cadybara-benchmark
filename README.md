@@ -138,14 +138,17 @@ export-cadgenbench EXP005 RUN001 ./cadgenbench-submission \
   --submission-name "Gemini Flash 100 Series" \
   --agent-url "https://example.com/agent" \
   --notes "Generated with cadybara-benchmark." \
-  --render-step
+  --render-step \
+  --copy
 ```
 
 The package folder contains top-level `meta.json` and one folder per sample.
 Each successful sample contains `output.step`; failed or missing samples are
 left as empty sample folders so CADGenBench scores them as missing. Use
 `--render-step` to render `output.step` from a run artifact's
-`generated_code.py` with CadQuery when available.
+`generated_code.py` with CadQuery when available. Use `--copy` with 200-series
+exports to fall back to `cadgenbench-data/<sample>/input.step` only when the
+run did not produce an `output.step`.
 
 Inspect the experiment:
 

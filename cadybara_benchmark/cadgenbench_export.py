@@ -31,6 +31,8 @@ def export_cadgenbench_submission(
     notes: str | None = None,
     agree_to_publish: bool = True,
     render_step: bool = False,
+    copy: bool = False,
+    data_dir: Path = Path("cadgenbench-data"),
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     settings = settings or get_settings()
@@ -39,6 +41,7 @@ def export_cadgenbench_submission(
     selected_series = _normalize_series(series)
 
     destination = destination.expanduser().resolve()
+    data_dir = data_dir.expanduser().resolve()
     destination.mkdir(parents=True, exist_ok=True)
     queries = _selected_run_queries(experiment, run, selected_series)
     if not queries:
@@ -61,9 +64,12 @@ def export_cadgenbench_submission(
         sample_dir = destination / item["sample_id"]
         sample_dir.mkdir(parents=True, exist_ok=True)
         output_path = _export_query_step(
+            item,
             item["run_query"],
             sample_dir,
             render_step=render_step,
+            copy=copy,
+            data_dir=data_dir,
         )
         exported.append(
             {
@@ -80,6 +86,7 @@ def export_cadgenbench_submission(
         "destination": str(destination),
         "series": series,
         "render_step": render_step,
+        "copy": copy,
         "exported": exported,
         "count": len(exported),
         "with_output_step": sum(1 for item in exported if item["output_step"]),
@@ -132,27 +139,35 @@ def _series_for_sample_id(sample_id: str) -> Literal["100", "200"]:
 
 
 def _export_query_step(
+    item: dict[str, Any],
     run_query: dict[str, Any],
     sample_dir: Path,
     *,
     render_step: bool,
+    copy: bool,
+    data_dir: Path,
 ) -> Path | None:
     artifact_dir_value = str(run_query.get("artifact_dir") or "")
-    if run_query.get("status") != "completed" or not artifact_dir_value:
-        return None
+    if run_query.get("status") == "completed" and artifact_dir_value:
+        artifact_dir = _resolve_path(artifact_dir_value)
+        generated_code_path = artifact_dir / "generated_code.py"
+        if render_step and generated_code_path.exists():
+            output_path = sample_dir / "output.step"
+            output_path.write_bytes(render_code_to_step(generated_code_path.read_text()))
+            return output_path
 
-    artifact_dir = _resolve_path(artifact_dir_value)
-    generated_code_path = artifact_dir / "generated_code.py"
-    if render_step and generated_code_path.exists():
-        output_path = sample_dir / "output.step"
-        output_path.write_bytes(render_code_to_step(generated_code_path.read_text()))
-        return output_path
+        step_path = artifact_dir / "model.step"
+        if step_path.exists():
+            output_path = sample_dir / "output.step"
+            shutil.copyfile(step_path, output_path)
+            return output_path
 
-    step_path = artifact_dir / "model.step"
-    if step_path.exists():
-        output_path = sample_dir / "output.step"
-        shutil.copyfile(step_path, output_path)
-        return output_path
+    if copy and item["series"] == "200":
+        reference_step = data_dir / item["sample_id"] / "input.step"
+        if reference_step.exists():
+            output_path = sample_dir / "output.step"
+            shutil.copyfile(reference_step, output_path)
+            return output_path
 
     return None
 

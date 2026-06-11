@@ -47,6 +47,17 @@ def export_cadgenbench(
             help="Render output.step from generated_code.py with CadQuery when available.",
         ),
     ] = False,
+    copy: Annotated[
+        bool,
+        typer.Option(
+            "--copy/--no-copy",
+            help="For 200-series samples without an exported STEP, copy cadgenbench-data input.step.",
+        ),
+    ] = False,
+    data_dir: Annotated[
+        Path,
+        typer.Option("--data-dir", help="Path to cadgenbench-data for --copy fallback."),
+    ] = Path("cadgenbench-data"),
 ) -> None:
     try:
         result = export_cadgenbench_submission(
@@ -60,6 +71,8 @@ def export_cadgenbench(
             notes=notes,
             agree_to_publish=agree_to_publish,
             render_step=render_step,
+            copy=copy,
+            data_dir=data_dir,
         )
     except Exception as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)

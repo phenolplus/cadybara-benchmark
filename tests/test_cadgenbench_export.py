@@ -195,6 +195,93 @@ def test_export_cadgenbench_code_only_sample_requires_render_step(
     assert (with_render / "104" / "output.step").read_bytes() == b"rendered step"
 
 
+def test_export_cadgenbench_copy_fallback_for_200_series(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CADYBARA_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("CADYBARA_PUBLISHED_DIR", str(tmp_path / "published"))
+    _write_experiment()
+    data_dir = tmp_path / "cadgenbench-data"
+    (data_dir / "201").mkdir(parents=True)
+    (data_dir / "201" / "input.step").write_text("reference 201")
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "completed_with_errors",
+            "started_at": "",
+            "finished_at": "",
+            "parameters": {},
+            "queries": [
+                {"query_id": "104", "status": "failed", "artifact_dir": ""},
+                {"query_id": "201", "status": "failed", "artifact_dir": ""},
+            ],
+            "summary": {"completed": 0, "failed": 2},
+        }
+    )
+
+    destination = tmp_path / "submission"
+    result = export_cadgenbench_submission(
+        "EXP001",
+        "RUN001",
+        destination,
+        series="both",
+        copy=True,
+        data_dir=data_dir,
+    )
+
+    assert result["copy"] is True
+    assert result["with_output_step"] == 1
+    assert not (destination / "104" / "output.step").exists()
+    assert (destination / "201" / "output.step").read_text() == "reference 201"
+
+
+def test_export_cadgenbench_copy_does_not_override_run_step(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CADYBARA_WORKSPACE_DIR", str(tmp_path / "workspace"))
+    monkeypatch.setenv("CADYBARA_PUBLISHED_DIR", str(tmp_path / "published"))
+    _write_experiment()
+    data_dir = tmp_path / "cadgenbench-data"
+    (data_dir / "201").mkdir(parents=True)
+    (data_dir / "201" / "input.step").write_text("reference 201")
+    artifacts = run_dir("EXP001", "RUN001")
+    (artifacts / "201").mkdir(parents=True)
+    (artifacts / "201" / "model.step").write_text("run 201")
+    save_run_summary(
+        {
+            "id": "RUN001",
+            "experiment_id": "EXP001",
+            "status": "completed",
+            "started_at": "",
+            "finished_at": "",
+            "parameters": {},
+            "queries": [
+                {
+                    "query_id": "201",
+                    "status": "completed",
+                    "artifact_dir": str(artifacts / "201"),
+                }
+            ],
+            "summary": {"completed": 1, "failed": 0},
+        }
+    )
+
+    destination = tmp_path / "submission"
+    export_cadgenbench_submission(
+        "EXP001",
+        "RUN001",
+        destination,
+        series="200",
+        copy=True,
+        data_dir=data_dir,
+    )
+
+    assert (destination / "201" / "output.step").read_text() == "run 201"
+
+
 def _write_experiment() -> None:
     save_experiment(
         {

@@ -25,6 +25,7 @@ workspace/responses/
 workspace/generated/
 workspace/reports/
 workspace/artifacts/
+workspace/prompts/
 
 # OS/editor noise
 .DS_Store

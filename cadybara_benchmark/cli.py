@@ -82,15 +82,26 @@ def show_experiment(experiment_id: str) -> None:
 @app.command("add-query")
 def add_query(
     experiment_id: str,
-    text: Annotated[str | None, typer.Option(prompt=True)] = None,
+    text: Annotated[str | None, typer.Option()] = None,
+    text_file: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Read query text from a UTF-8 text file.",
+        ),
+    ] = None,
     category: Annotated[str, typer.Option()] = "",
     model: Annotated[str | None, typer.Option()] = None,
     image_path: Annotated[list[Path] | None, typer.Option(help="Reference image file(s)")] = None,
 ) -> None:
     try:
+        query_text = _resolve_query_text(text, text_file, image_path)
         query = add_query_service(
             experiment_id,
-            text or "",
+            query_text,
             category,
             model,
             image_paths=image_path,
@@ -99,6 +110,20 @@ def add_query(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         _handle_error(exc)
     typer.echo(f"Created query {query['id']} for {experiment_id}")
+
+
+def _resolve_query_text(
+    text: str | None,
+    text_file: Path | None,
+    image_path: list[Path] | None,
+) -> str:
+    if text is not None and text_file is not None:
+        raise ValueError("Use either --text or --text-file, not both.")
+    if text_file is not None:
+        return text_file.read_text(encoding="utf-8")
+    if text is None and not image_path:
+        return typer.prompt("Text")
+    return text or ""
 
 
 @app.command("list-queries")

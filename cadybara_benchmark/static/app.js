@@ -1,3 +1,10 @@
+import {
+  bindCollapsibleQueryText,
+  finalizeCollapsibleQueryTexts,
+  formatCollapsibleQueryText,
+  prepareQueryTextToggle,
+} from "./query-text.js";
+
 const app = document.querySelector("#app");
 const alerts = document.querySelector("#alerts");
 const themeSwitch = document.querySelector("#themeSwitch");
@@ -307,7 +314,7 @@ function runQueriesTable(queries, experimentId, runId) {
             <td class="metrics-cell query-metrics-cell">${formatQueryMetrics(query)}</td>
             <td class="query-text">
               ${formatQueryImages(query.images)}
-              ${query.images?.length ? `<div class="mt-2">${escapeHtml(query.text || "")}</div>` : escapeHtml(query.text || "")}
+              ${query.images?.length ? `<div class="mt-2">${formatCollapsibleQueryText(query.text, escapeHtml)}</div>` : formatCollapsibleQueryText(query.text, escapeHtml)}
               ${query.status === "failed" && query.error ? `<div class="text-danger small mt-1">${escapeHtml(formatError(query.error))}</div>` : ""}
             </td>
             <td class="text-nowrap">
@@ -326,7 +333,10 @@ function bindRunsTable() {
   if (!table) return;
   const compareButton = document.querySelector("#compareSelectedRuns");
 
+  bindCollapsibleQueryText(table);
+
   table.addEventListener("click", (event) => {
+    if (event.target.closest(".query-text-toggle.is-truncatable")) return;
     const action = event.target.closest("[data-run-action]");
     if (action) {
       event.stopPropagation();
@@ -350,6 +360,7 @@ function bindRunsTable() {
 
   table.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    if (event.target.closest(".query-text-toggle.is-truncatable")) return;
     if (event.target.closest("button, a, input")) return;
     const row = event.target.closest(".run-row");
     if (!row) return;
@@ -367,6 +378,25 @@ function bindRunsTable() {
   });
 
   updateCompareRunsButton();
+  prepareRunQueryTextToggles(table);
+  finalizeCollapsibleQueryTexts(table);
+}
+
+function prepareRunQueryTextToggles(table) {
+  if (!state.current?.runs) return;
+  for (const run of state.current.runs) {
+    const runId = run.id;
+    const detail = table.querySelector(`.run-detail-row[data-run-id="${runId}"]`);
+    if (!detail) continue;
+    for (const query of run.queries || []) {
+      const queryId = query.query_id || query.id || "";
+      for (const row of detail.querySelectorAll("tr")) {
+        const idCell = row.querySelector("td.fw-semibold");
+        if (idCell?.textContent !== queryId) continue;
+        prepareQueryTextToggle(row.querySelector(".query-text-toggle"), query.text);
+      }
+    }
+  }
 }
 
 function selectedRunIdsForCompare() {
@@ -1221,5 +1251,7 @@ function escapeHtml(value) {
 function escapeAttr(value) {
   return escapeHtml(value).replaceAll("`", "&#096;");
 }
+
+window.navigate = navigate;
 
 route().catch((error) => showAlert(error.message, "danger"));

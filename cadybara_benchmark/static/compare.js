@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import {
+  bindCollapsibleQueryText,
+  finalizeCollapsibleQueryTexts,
+  formatCollapsibleQueryText,
+  prepareQueryTextToggle,
+} from "./query-text.js";
 
 const savedTheme = localStorage.getItem("theme") || "light";
 document.documentElement.dataset.bsTheme = savedTheme;
@@ -56,6 +62,7 @@ async function initCompare() {
     compareGrid.replaceChildren();
     const blocks = compareItems.map((item) => {
       const { element, host } = createBlockShell(item);
+      prepareQueryTextToggle(element.querySelector(".query-text-toggle"), item.query.text);
       compareGrid.append(element);
       return { element, item, host };
     });
@@ -67,6 +74,8 @@ async function initCompare() {
     setupViewportResize(viewports);
     setupSyncedControls(viewports);
     setupBlockInteractions(blocks, compareGrid);
+    bindCollapsibleQueryText(compareGrid);
+    finalizeCollapsibleQueryTexts(compareGrid);
     autoMinimizeInProgressBlocks(blocks, compareGrid);
     fitAllCameras(viewports);
     animate(viewports);
@@ -142,9 +151,9 @@ function createBlockShell(item) {
         <div class="label">Model</div>
         <div class="value">${escapeHtml(query.model || "(default)")}</div>
       </div>
-      <div>
+      <div class="compare-meta-field compare-meta-prompt">
         <div class="label">Prompt</div>
-        <div class="value">${escapeHtml(query.text || "")}</div>
+        <div class="value compare-prompt-value">${formatCollapsibleQueryText(query.text, escapeHtml)}</div>
       </div>
       ${formatQueryImagesBlock(query.images)}
       ${formatClientLatencyBlock(query)}

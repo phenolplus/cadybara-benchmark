@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import {
+  bindCollapsibleQueryText,
+  finalizeCollapsibleQueryTexts,
+  formatCollapsibleQueryText,
+  prepareQueryTextToggle,
+} from "./query-text.js";
 
 const savedTheme = localStorage.getItem("theme") || "light";
 document.documentElement.dataset.bsTheme = savedTheme;
@@ -30,7 +36,10 @@ async function initViewer() {
     meta.textContent = `${experimentId} · ${runId} · ${query.query_id || queryId}`;
     title.textContent = query.query_id || queryId;
     const latencyMs = getClientLatencyMs(query);
-    text.textContent = query.text || "";
+    text.innerHTML = formatCollapsibleQueryText(query.text, escapeHtml);
+    prepareQueryTextToggle(text.querySelector(".query-text-toggle"), query.text || "");
+    bindCollapsibleQueryText(text);
+    finalizeCollapsibleQueryTexts(text);
     if (latencyMs !== null) {
       const latencyLine = document.createElement("div");
       latencyLine.className = "text-body-secondary small mt-1";
@@ -147,6 +156,15 @@ async function fetchJson(url) {
 function showError(message) {
   status.textContent = message;
   status.classList.add("text-danger");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function getClientLatencyMs(query) {

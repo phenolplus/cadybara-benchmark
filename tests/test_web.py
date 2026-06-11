@@ -1044,6 +1044,51 @@ def test_reconcile_persisted_run_unregisters_stale_active_run(settings):
     assert reconciled["queries"][0]["status"] == "cancelled"
 
 
+def test_app_collapses_long_run_query_text():
+    script = (STATIC_DIR / "app.js").read_text()
+    css = (STATIC_DIR / "app.css").read_text()
+    shared = (STATIC_DIR / "query-text.js").read_text()
+
+    assert 'from "./query-text.js"' in script
+    assert "formatCollapsibleQueryText" in script
+    assert "finalizeCollapsibleQueryTexts" in script
+    assert "QUERY_TEXT_MAX_CHARS = 512" in shared
+    assert "QUERY_TEXT_MAX_LINES = 3" in shared
+    assert "-webkit-line-clamp: 3" in css
+    assert "query-text-toggle.is-collapsed .query-text-preview" in css
+
+
+def test_compare_layout_keeps_meta_visible():
+    css = (STATIC_DIR / "compare.css").read_text()
+    shared = (STATIC_DIR / "query-text.js").read_text()
+
+    assert "min-width: 0" in css
+    assert "compare-prompt-value" in css
+    assert ".compare-meta .query-text-toggle.is-collapsed .query-text-preview" in css
+    assert "prepareQueryTextToggle" in shared
+    assert "getQueryTextRaw" in shared
+
+
+def test_compare_collapses_long_query_text():
+    script = (STATIC_DIR / "compare.js").read_text()
+
+    assert 'from "./query-text.js"' in script
+    assert "prepareQueryTextToggle" in script
+    assert "formatCollapsibleQueryText(query.text, escapeHtml)" in script
+    assert "finalizeCollapsibleQueryTexts(compareGrid)" in script
+    assert "bindCollapsibleQueryText(compareGrid)" in script
+    assert "compare-prompt-value" in script
+
+
+def test_stl_viewer_collapses_long_query_text():
+    script = (STATIC_DIR / "stl-viewer.js").read_text()
+
+    assert 'from "./query-text.js"' in script
+    assert "formatCollapsibleQueryText(query.text, escapeHtml)" in script
+    assert "finalizeCollapsibleQueryTexts(text)" in script
+    assert "bindCollapsibleQueryText(text)" in script
+
+
 def test_app_route_resets_modal_backdrop():
     script = (STATIC_DIR / "app.js").read_text()
 

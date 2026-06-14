@@ -3,10 +3,11 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 from typing import Any, Literal
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from cadybara_benchmark.config import REPO_ROOT, Settings, get_settings
 from cadybara_benchmark.experiment_files import load_experiment
-from cadybara_benchmark.geometry import render_code_to_step
+from cadybara_benchmark.geometry import render_code_to_step, render_default_sphere_step
 from cadybara_benchmark.json_utils import dumps_json
 from cadybara_benchmark.run_files import get_run
 
@@ -25,13 +26,15 @@ def export_cadgenbench_submission(
     destination: Path,
     *,
     series: CadGenBenchExportSeries = "both",
-    submitter_name: str = "Cadybara Benchmark",
+    submitter_name: str = "Cadybara",
     submission_name: str | None = None,
-    agent_url: str | None = None,
+    agent_url: str | None = "cadybara.com",
     notes: str | None = None,
     agree_to_publish: bool = True,
     render_step: bool = False,
     copy: bool = False,
+    zip: bool = False,
+    zip_path: Path | None = None,
     data_dir: Path = Path("cadgenbench-data"),
     settings: Settings | None = None,
 ) -> dict[str, Any]:
@@ -80,6 +83,7 @@ def export_cadgenbench_submission(
             }
         )
 
+    created_zip = _write_submission_zip(destination, zip_path) if zip else None
     return {
         "experiment_id": experiment_id,
         "run_id": run_id,
@@ -87,6 +91,7 @@ def export_cadgenbench_submission(
         "series": series,
         "render_step": render_step,
         "copy": copy,
+        "zip": str(created_zip) if created_zip else "",
         "exported": exported,
         "count": len(exported),
         "with_output_step": sum(1 for item in exported if item["output_step"]),
@@ -152,9 +157,12 @@ def _export_query_step(
         artifact_dir = _resolve_path(artifact_dir_value)
         generated_code_path = artifact_dir / "generated_code.py"
         if render_step and generated_code_path.exists():
-            output_path = sample_dir / "output.step"
-            output_path.write_bytes(render_code_to_step(generated_code_path.read_text()))
-            return output_path
+            try:
+                output_path = sample_dir / "output.step"
+                output_path.write_bytes(render_code_to_step(generated_code_path.read_text()))
+                return output_path
+            except Exception:
+                output_path.unlink(missing_ok=True)
 
         step_path = artifact_dir / "model.step"
         if step_path.exists():
@@ -169,7 +177,13 @@ def _export_query_step(
             shutil.copyfile(reference_step, output_path)
             return output_path
 
-    return None
+    return _write_default_sphere_step(sample_dir)
+
+
+def _write_default_sphere_step(sample_dir: Path) -> Path:
+    output_path = sample_dir / "output.step"
+    output_path.write_bytes(render_default_sphere_step())
+    return output_path
 
 
 def _build_meta(
@@ -202,6 +216,31 @@ def _normalize_series(series: str) -> list[Literal["100", "200"]]:
     if series in {"100", "200"}:
         return [series]  # type: ignore[list-item]
     raise ValueError("Series must be 100, 200, or both.")
+
+
+def _write_submission_zip(destination: Path, zip_path: Path | None) -> Path:
+    if zip_path is None:
+        zip_path = destination.with_suffix(".zip")
+    else:
+        zip_path = zip_path.expanduser().resolve()
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    if zip_path.exists():
+        zip_path.unlink()
+
+    with ZipFile(zip_path, "w", compression=ZIP_DEFLATED) as archive:
+        for path in sorted(destination.rglob("*")):
+            if path.is_dir() or _skip_zip_entry(destination, path):
+                continue
+            archive.write(path, path.relative_to(destination).as_posix())
+    return zip_path
+
+
+def _skip_zip_entry(root: Path, path: Path) -> bool:
+    parts = path.relative_to(root).parts
+    return any(
+        part == ".DS_Store" or part == "__MACOSX" or part.startswith("._")
+        for part in parts
+    )
 
 
 def _resolve_path(path: str) -> Path:

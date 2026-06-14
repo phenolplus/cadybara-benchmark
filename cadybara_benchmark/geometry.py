@@ -33,6 +33,11 @@ def render_code_to_step(code: str) -> bytes:
     return _export_to_step_bytes(workplane)
 
 
+def render_default_sphere_step() -> bytes:
+    workplane = cq.Workplane("XY").sphere(12.5)
+    return _export_to_step_bytes(workplane)
+
+
 def render_step_to_stl(
     step_bytes: bytes,
     *,

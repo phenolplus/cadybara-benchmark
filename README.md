@@ -139,16 +139,18 @@ export-cadgenbench EXP005 RUN001 ./cadgenbench-submission \
   --agent-url "https://example.com/agent" \
   --notes "Generated with cadybara-benchmark." \
   --render-step \
-  --copy
+  --copy \
+  --zip
 ```
 
 The package folder contains top-level `meta.json` and one folder per sample.
-Each successful sample contains `output.step`; failed or missing samples are
-left as empty sample folders so CADGenBench scores them as missing. Use
-`--render-step` to render `output.step` from a run artifact's
-`generated_code.py` with CadQuery when available. Use `--copy` with 200-series
-exports to fall back to `cadgenbench-data/<sample>/input.step` only when the
-run did not produce an `output.step`.
+Each sample contains `output.step`; when no run STEP can be copied or rendered,
+the exporter writes a default 25mm-diameter sphere STEP. Use `--render-step` to
+render `output.step` from a run artifact's `generated_code.py` with CadQuery
+when available. Use `--copy` with 200-series exports to fall back to
+`cadgenbench-data/<sample>/input.step` before the default sphere. Use `--zip` to
+create a clean submission archive without a wrapper folder or macOS metadata
+files.
 
 Inspect the experiment:
 

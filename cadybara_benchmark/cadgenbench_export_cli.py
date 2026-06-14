@@ -23,7 +23,7 @@ def export_cadgenbench(
     submitter_name: Annotated[
         str,
         typer.Option("--submitter-name", help="meta.json submitter_name."),
-    ] = "Cadybara Benchmark",
+    ] = "Cadybara",
     submission_name: Annotated[
         str | None,
         typer.Option("--submission-name", help="meta.json submission_name."),
@@ -31,7 +31,7 @@ def export_cadgenbench(
     agent_url: Annotated[
         str | None,
         typer.Option("--agent-url", help="meta.json agent_url."),
-    ] = None,
+    ] = "cadybara.com",
     notes: Annotated[
         str | None,
         typer.Option("--notes", help="meta.json notes."),
@@ -54,6 +54,14 @@ def export_cadgenbench(
             help="For 200-series samples without an exported STEP, copy cadgenbench-data input.step.",
         ),
     ] = False,
+    zip: Annotated[
+        bool,
+        typer.Option("--zip/--no-zip", help="Create a clean zip package next to the destination folder."),
+    ] = False,
+    zip_path: Annotated[
+        Path | None,
+        typer.Option("--zip-path", help="Optional output path for --zip."),
+    ] = None,
     data_dir: Annotated[
         Path,
         typer.Option("--data-dir", help="Path to cadgenbench-data for --copy fallback."),
@@ -72,6 +80,8 @@ def export_cadgenbench(
             agree_to_publish=agree_to_publish,
             render_step=render_step,
             copy=copy,
+            zip=zip,
+            zip_path=zip_path,
             data_dir=data_dir,
         )
     except Exception as exc:
@@ -82,6 +92,8 @@ def export_cadgenbench(
         f"Exported {result['count']} CadGenBench sample folder(s) to {result['destination']} "
         f"({result['with_output_step']} with output.step)"
     )
+    if result.get("zip"):
+        typer.echo(f"Zip: {result['zip']}")
 
 
 def main() -> None:
